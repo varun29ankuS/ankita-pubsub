@@ -1,16 +1,33 @@
 # Ankita PubSub System
 
-A production-ready **Publisher-Subscriber messaging system** built with Bun and TypeScript. Includes a real-time dashboard for monitoring and testing.
+A production-ready **Publisher-Subscriber messaging system** built with Bun and TypeScript. Features enterprise-grade monitoring, Prometheus metrics, health checks, and a real-time dashboard.
 
 ## Features
 
-- **Topic-based Messaging** - Publish and subscribe to named topics
+### Core Messaging
+- **Topic-based Messaging** - Publish and subscribe to named topics with dot-notation hierarchy
 - **Message Queueing** - Offline subscribers receive messages when they reconnect
 - **Request/Reply Pattern** - Synchronous request-response over async messaging
-- **Dead Letter Queue** - Failed messages are captured for debugging
-- **API Key Authentication** - Secure access with rate limiting
-- **Real-time Dashboard** - Visual monitoring of all system activity
-- **WebSocket Support** - Low-latency real-time communication
+- **Consumer Groups** - Load-balanced message consumption with round-robin distribution
+- **Dead Letter Queue** - Failed messages captured for debugging and retry
+
+### Enterprise Features
+- **API Key Authentication** - Secure access with role-based permissions and rate limiting
+- **Prometheus Metrics** - Export metrics for monitoring and alerting
+- **Health Checks** - Kubernetes-compatible liveness and readiness probes
+- **Structured Logging** - JSON logging with correlation IDs for traceability
+- **Audit Logging** - Security event tracking for compliance
+- **Graceful Shutdown** - Clean shutdown handling for zero-downtime deployments
+- **SQLite Persistence** - Message and configuration storage
+
+### Dashboard
+- **Real-time Monitoring** - Live message feed and throughput charts
+- **Topic Management** - Create, view, and manage topics
+- **Subscriber Overview** - Monitor connected clients and their subscriptions
+- **Health Status** - Visual health check dashboard
+- **Prometheus Preview** - View and copy metrics endpoint configuration
+- **System Info** - Memory usage, uptime, and configuration display
+- **Audit Log** - Security event viewer
 
 ## Architecture
 
@@ -22,16 +39,16 @@ A production-ready **Publisher-Subscriber messaging system** built with Bun and 
                     │  - Topics       │
 ┌─────────────┐     │  - Queues       │     ┌──────────────┐
 │  Publisher  │────▶│  - Routing      │────▶│  Subscriber  │
-└─────────────┘     └────────┬────────┘     └──────────────┘
+└─────────────┘     │  - Persistence  │     └──────────────┘
+                    └────────┬────────┘
                              │
-                             │ WebSocket
-                             ▼
-                    ┌─────────────────┐
-                    │    Dashboard    │
-                    │  - Live msgs    │
-                    │  - Topic stats  │
-                    │  - Subscribers  │
-                    └─────────────────┘
+              ┌──────────────┼──────────────┐
+              │              │              │
+              ▼              ▼              ▼
+     ┌─────────────┐  ┌───────────┐  ┌───────────┐
+     │  Dashboard  │  │  Metrics  │  │  Health   │
+     │  (WebSocket)│  │ /metrics  │  │  /health  │
+     └─────────────┘  └───────────┘  └───────────┘
 ```
 
 ## Quick Start
@@ -51,12 +68,39 @@ cd ankita-pubsub
 bun install
 
 # Start the server
-bun run dev
+bun run start
 ```
 
-### Access the Dashboard
+### Access Points
 
-Open http://localhost:3000 in your browser.
+| Endpoint | URL | Description |
+|----------|-----|-------------|
+| Dashboard | http://localhost:3000 | Real-time monitoring UI |
+| Metrics | http://localhost:3000/metrics | Prometheus metrics |
+| Health | http://localhost:3000/health | Detailed health status |
+| Liveness | http://localhost:3000/health/live | Kubernetes liveness probe |
+| Readiness | http://localhost:3000/health/ready | Kubernetes readiness probe |
+| OpenAPI | http://localhost:3000/openapi.yaml | API documentation |
+
+## Configuration
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `NODE_ENV` | development | Environment (development/staging/production) |
+| `PORT` | 3000 | Server port |
+| `HOST` | localhost | Server host |
+| `ADMIN_API_KEY` | (auto-generated) | Admin API key |
+| `JWT_SECRET` | (auto-generated) | JWT signing secret |
+| `RATE_LIMIT_REQUESTS` | 1000 | Max requests per window |
+| `RATE_LIMIT_WINDOW_MS` | 60000 | Rate limit window (ms) |
+| `MAX_QUEUE_SIZE` | 10000 | Max messages per subscriber queue |
+| `MAX_MESSAGE_SIZE` | 1048576 | Max message size (bytes) |
+| `MESSAGE_RETENTION_MS` | 86400000 | Message retention (24 hours) |
+| `LOG_LEVEL` | info | Logging level (debug/info/warn/error) |
+| `LOG_FORMAT` | json | Log format (json/pretty) |
+| `METRICS_ENABLED` | true | Enable Prometheus metrics |
 
 ## Usage
 
@@ -99,60 +143,61 @@ Connect to `ws://localhost:3000` and send JSON messages:
 
 ### REST API
 
-#### Health Check
+#### Health Endpoints (Public)
 
 ```bash
-GET /api/health
+# Detailed health status
+GET /health
+
+# Kubernetes liveness probe
+GET /health/live
+
+# Kubernetes readiness probe
+GET /health/ready
 ```
 
-#### Get Metrics
+#### Prometheus Metrics (Public)
 
 ```bash
-GET /api/metrics
-Headers: X-API-Key: YOUR_API_KEY
+GET /metrics
 ```
 
-#### List Topics
-
-```bash
-GET /api/topics
-Headers: X-API-Key: YOUR_API_KEY
-```
-
-#### Create Topic
-
-```bash
-POST /api/topics
-Headers: X-API-Key: YOUR_API_KEY
-Content-Type: application/json
-
-{ "name": "my.topic", "config": { "maxQueueSize": 1000 } }
-```
-
-#### Publish Message
-
-```bash
-POST /api/publish
-Headers: X-API-Key: YOUR_API_KEY
-Content-Type: application/json
-
-{ "topic": "orders.created", "payload": { "data": "value" } }
-```
-
-#### Get Demo API Keys
+#### Demo API Keys (Public)
 
 ```bash
 GET /api/keys/demo
 ```
 
-## Configuration
+#### Protected Endpoints
 
-Environment variables:
+All protected endpoints require the `X-API-Key` header.
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `PORT` | 3000 | Server port |
-| `HOST` | localhost | Server host |
+```bash
+# Get system metrics
+GET /api/metrics
+
+# List topics
+GET /api/topics
+
+# Create topic
+POST /api/topics
+Content-Type: application/json
+{ "name": "my.topic", "config": { "maxQueueSize": 1000 } }
+
+# Publish message
+POST /api/publish
+Content-Type: application/json
+{ "topic": "orders.created", "payload": { "data": "value" } }
+
+# List subscribers
+GET /api/subscribers
+
+# Get dead letter queue
+GET /api/dlq
+
+# Get message history
+GET /api/messages/{topic}
+```
 
 ## Demo Simulator
 
@@ -168,6 +213,22 @@ This simulates:
 - **NotificationService** - Sends notifications
 - **AnalyticsService** - Tracks all events
 
+## Testing
+
+```bash
+# Run all tests
+bun test
+
+# Run unit tests only
+bun test:unit
+
+# Run integration tests
+bun test:integration
+
+# Type checking
+bun run typecheck
+```
+
 ## Project Structure
 
 ```
@@ -178,20 +239,101 @@ ankita-pubsub/
 │   │   ├── broker.ts         # Core message broker
 │   │   ├── topic.ts          # Topic management
 │   │   ├── queue.ts          # Message queue
+│   │   ├── consumer-group.ts # Consumer group management
 │   │   └── types.ts          # TypeScript interfaces
 │   ├── auth/
 │   │   └── auth.ts           # API key authentication
+│   ├── storage/
+│   │   └── database.ts       # SQLite persistence layer
+│   ├── config/
+│   │   └── index.ts          # Environment configuration
+│   ├── logging/
+│   │   └── index.ts          # Structured JSON logging
+│   ├── metrics/
+│   │   └── index.ts          # Prometheus metrics
+│   ├── health/
+│   │   └── index.ts          # Health check system
+│   ├── audit/
+│   │   └── index.ts          # Audit logging
 │   ├── utils/
-│   │   └── logger.ts         # Logging utility
+│   │   └── logger.ts         # Legacy logging utility
 │   └── demo/
 │       └── simulator.ts      # Demo simulation
 ├── public/
 │   ├── index.html            # Dashboard HTML
 │   ├── style.css             # Dashboard styles
-│   └── app.js                # Dashboard frontend
+│   ├── app.js                # Dashboard frontend
+│   └── openapi.yaml          # OpenAPI specification
+├── tests/
+│   ├── broker.test.ts        # Broker unit tests
+│   ├── auth.test.ts          # Auth unit tests
+│   └── health.test.ts        # Health integration tests
 ├── package.json
 ├── tsconfig.json
 └── README.md
+```
+
+## Prometheus Integration
+
+Add to your `prometheus.yml`:
+
+```yaml
+scrape_configs:
+  - job_name: 'ankita-pubsub'
+    static_configs:
+      - targets: ['localhost:3000']
+    metrics_path: '/metrics'
+    scrape_interval: 15s
+```
+
+### Available Metrics
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `ankita_messages_published_total` | Counter | Total messages published |
+| `ankita_messages_delivered_total` | Counter | Total messages delivered |
+| `ankita_messages_failed_total` | Counter | Failed deliveries |
+| `ankita_active_connections` | Gauge | WebSocket connections |
+| `ankita_topics_total` | Gauge | Number of topics |
+| `ankita_dead_letter_queue_size` | Gauge | DLQ size |
+| `ankita_uptime_seconds` | Gauge | Server uptime |
+| `ankita_memory_heap_used_bytes` | Gauge | Heap memory usage |
+
+## Kubernetes Deployment
+
+Example deployment with health probes:
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ankita-pubsub
+spec:
+  replicas: 1
+  template:
+    spec:
+      containers:
+      - name: ankita-pubsub
+        image: ankita-pubsub:latest
+        ports:
+        - containerPort: 3000
+        livenessProbe:
+          httpGet:
+            path: /health/live
+            port: 3000
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health/ready
+            port: 3000
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        env:
+        - name: NODE_ENV
+          value: "production"
+        - name: PORT
+          value: "3000"
 ```
 
 ## Key Concepts
@@ -204,20 +346,13 @@ Topics are named channels for messages. Use dot notation for hierarchy:
 - `orders.updated`
 - `inventory.stock.low`
 
-### Message Flow
+### Consumer Groups
 
-1. **Publisher** sends a message to a topic
-2. **Broker** routes the message to all subscribers
-3. **Online subscribers** receive immediately
-4. **Offline subscribers** get messages queued
+Consumer groups enable load-balanced message consumption:
 
-### Request/Reply Pattern
-
-For synchronous operations over async messaging:
-
-1. Requester publishes to a topic with a `replyTo` topic
-2. Responder subscribes, processes, and calls `broker.reply()`
-3. Requester receives response on their reply topic
+- Messages are distributed across group members
+- Each message is delivered to only one member
+- Supports round-robin and broadcast strategies
 
 ### Dead Letter Queue
 
@@ -226,14 +361,7 @@ Messages that fail delivery after max retries are moved to the DLQ:
 - Delivery errors
 - Max retries exceeded
 
-## Scaling Considerations
-
-This is an in-memory implementation for educational purposes. For production scale:
-
-1. **Persistence** - Add Redis or PostgreSQL for message storage
-2. **Clustering** - Use Redis Pub/Sub for multi-node coordination
-3. **Partitioning** - Shard topics across nodes
-4. **Backpressure** - Implement flow control
+Messages can be retried or deleted from the dashboard.
 
 ## API Reference
 
@@ -252,16 +380,14 @@ This is an in-memory implementation for educational purposes. For production sca
 | `metrics` | Bidirectional | System metrics |
 | `error` | Server → Client | Error notification |
 
-### Topic Configuration
+### API Key Permissions
 
-| Option | Default | Description |
-|--------|---------|-------------|
-| `maxQueueSize` | 1000 | Max messages per subscriber queue |
-| `messageRetention` | 3600000 | Message history retention (ms) |
-| `maxRetries` | 3 | Max delivery attempts |
-| `retryDelay` | 5000 | Delay between retries (ms) |
-| `requireAck` | false | Require message acknowledgment |
+| Permission | Description |
+|------------|-------------|
+| `admin` | Full access to all operations |
+| `publish` | Can publish messages |
+| `subscribe` | Can subscribe to topics |
 
 ## License
 
-MIT
+Apache License 2.0
