@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(bun --version:*)",
+      "Bash(node --version:*)",
+      "WebSearch",
+      "Bash(git init:*)",
+      "Bash(gh auth status:*)",
+      "Bash(gh repo create:*)",
+      "Bash(gh repo rename:*)",
+      "Bash(bun install:*)",
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$(cat <<''EOF''\nInitial commit: Ankita PubSub messaging system\n\nFeatures:\n- Topic-based publish/subscribe messaging\n- Message queueing for offline subscribers\n- Request/reply pattern support\n- API key authentication with rate limiting\n- Dead letter queue for failed messages\n- Real-time WebSocket dashboard\n- Demo simulator with sample services\n\nBuilt with Bun + TypeScript for high performance.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")",
+      "Bash(timeout 5 bun run start:*)",
+      "Bash(gh repo edit:*)",
+      "Bash(bun run start)",
+      "Bash(bun run demo)",
+      "Bash(curl:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

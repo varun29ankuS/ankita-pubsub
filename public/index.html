@@ -1,0 +1,656 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ankita PubSub - Message Broker Dashboard</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body class="dark-mode">
+  <div class="app">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <div class="logo">
+          <svg viewBox="0 0 40 40" class="logo-icon">
+            <defs>
+              <linearGradient id="logoGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" style="stop-color:#0071D9"/>
+                <stop offset="100%" style="stop-color:#00D4FF"/>
+              </linearGradient>
+            </defs>
+            <circle cx="20" cy="20" r="18" fill="none" stroke="url(#logoGradient)" stroke-width="2"/>
+            <circle cx="20" cy="12" r="4" fill="url(#logoGradient)"/>
+            <circle cx="12" cy="26" r="4" fill="url(#logoGradient)"/>
+            <circle cx="28" cy="26" r="4" fill="url(#logoGradient)"/>
+            <line x1="20" y1="16" x2="14" y2="23" stroke="url(#logoGradient)" stroke-width="2"/>
+            <line x1="20" y1="16" x2="26" y2="23" stroke="url(#logoGradient)" stroke-width="2"/>
+            <line x1="16" y1="26" x2="24" y2="26" stroke="url(#logoGradient)" stroke-width="2"/>
+          </svg>
+          <div class="logo-text">
+            <span class="logo-name">Ankita</span>
+            <span class="logo-tagline">PubSub</span>
+          </div>
+        </div>
+      </div>
+
+      <nav class="sidebar-nav">
+        <a href="#" class="nav-item active" data-view="overview">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="3" width="7" height="7"/>
+            <rect x="14" y="3" width="7" height="7"/>
+            <rect x="14" y="14" width="7" height="7"/>
+            <rect x="3" y="14" width="7" height="7"/>
+          </svg>
+          <span>Overview</span>
+        </a>
+        <a href="#" class="nav-item" data-view="topics">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+          </svg>
+          <span>Topics</span>
+          <span class="nav-badge" id="topicsBadge">0</span>
+        </a>
+        <a href="#" class="nav-item" data-view="messages">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+          </svg>
+          <span>Messages</span>
+          <span class="nav-badge pulse" id="messagesBadge">0</span>
+        </a>
+        <a href="#" class="nav-item" data-view="subscribers">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+            <circle cx="9" cy="7" r="4"/>
+            <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+            <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+          </svg>
+          <span>Subscribers</span>
+          <span class="nav-badge" id="subscribersBadge">0</span>
+        </a>
+        <a href="#" class="nav-item" data-view="consumer-groups">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/>
+            <circle cx="12" cy="12" r="6"/>
+            <circle cx="12" cy="12" r="2"/>
+          </svg>
+          <span>Consumer Groups</span>
+        </a>
+        <a href="#" class="nav-item" data-view="dlq">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="3 6 5 6 21 6"/>
+            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+            <line x1="10" y1="11" x2="10" y2="17"/>
+            <line x1="14" y1="11" x2="14" y2="17"/>
+          </svg>
+          <span>Dead Letter Queue</span>
+          <span class="nav-badge warning" id="dlqBadge">0</span>
+        </a>
+
+        <div class="nav-divider"></div>
+
+        <a href="#" class="nav-item" data-view="publish">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="22" y1="2" x2="11" y2="13"/>
+            <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+          </svg>
+          <span>Publish Message</span>
+        </a>
+        <a href="#" class="nav-item" data-view="api-keys">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/>
+          </svg>
+          <span>API Keys</span>
+        </a>
+        <a href="#" class="nav-item" data-view="settings">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+          </svg>
+          <span>Settings</span>
+        </a>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="connection-indicator" id="connectionIndicator">
+          <span class="connection-dot"></span>
+          <span class="connection-text">Connecting...</span>
+        </div>
+        <div class="theme-toggle">
+          <button class="theme-btn" id="themeToggle" title="Toggle theme">
+            <svg class="sun-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="5"/>
+              <line x1="12" y1="1" x2="12" y2="3"/>
+              <line x1="12" y1="21" x2="12" y2="23"/>
+              <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/>
+              <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
+              <line x1="1" y1="12" x2="3" y2="12"/>
+              <line x1="21" y1="12" x2="23" y2="12"/>
+              <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/>
+              <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+            </svg>
+            <svg class="moon-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main-content">
+      <!-- Header -->
+      <header class="main-header">
+        <div class="header-left">
+          <h1 class="page-title" id="pageTitle">Overview</h1>
+          <div class="breadcrumb" id="breadcrumb">
+            <span>Dashboard</span>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+            <span>Overview</span>
+          </div>
+        </div>
+        <div class="header-right">
+          <div class="header-stats">
+            <div class="header-stat">
+              <span class="header-stat-value" id="headerMsgRate">0</span>
+              <span class="header-stat-label">msg/s</span>
+            </div>
+            <div class="header-stat">
+              <span class="header-stat-value" id="headerUptime">00:00:00</span>
+              <span class="header-stat-label">uptime</span>
+            </div>
+          </div>
+          <div class="header-actions">
+            <button class="btn btn-icon" id="refreshBtn" title="Refresh">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="23 4 23 10 17 10"/>
+                <polyline points="1 20 1 14 7 14"/>
+                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+              </svg>
+            </button>
+            <button class="btn btn-primary" id="newTopicBtn">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="12" y1="5" x2="12" y2="19"/>
+                <line x1="5" y1="12" x2="19" y2="12"/>
+              </svg>
+              New Topic
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <!-- Dynamic Content Area -->
+      <div class="content-area" id="contentArea">
+        <!-- Overview View (default) -->
+        <div class="view active" id="view-overview">
+          <!-- Stats Grid -->
+          <div class="stats-grid">
+            <div class="stat-card">
+              <div class="stat-icon blue">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                </svg>
+              </div>
+              <div class="stat-info">
+                <span class="stat-value" id="statTotalMessages">0</span>
+                <span class="stat-label">Total Messages</span>
+              </div>
+              <div class="stat-trend up">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/>
+                </svg>
+                <span id="statMessagesTrend">+0%</span>
+              </div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-icon green">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+                </svg>
+              </div>
+              <div class="stat-info">
+                <span class="stat-value" id="statMsgPerSec">0</span>
+                <span class="stat-label">Messages/sec</span>
+              </div>
+              <div class="stat-chart-mini">
+                <canvas id="msgRateChart" height="40"></canvas>
+              </div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-icon purple">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                </svg>
+              </div>
+              <div class="stat-info">
+                <span class="stat-value" id="statTopics">0</span>
+                <span class="stat-label">Active Topics</span>
+              </div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-icon cyan">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+                  <circle cx="9" cy="7" r="4"/>
+                  <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+                  <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+                </svg>
+              </div>
+              <div class="stat-info">
+                <span class="stat-value" id="statConnections">0</span>
+                <span class="stat-label">Active Connections</span>
+              </div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-icon orange">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="2" y="7" width="20" height="14" rx="2" ry="2"/>
+                  <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/>
+                </svg>
+              </div>
+              <div class="stat-info">
+                <span class="stat-value" id="statQueued">0</span>
+                <span class="stat-label">Queued Messages</span>
+              </div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-icon red">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="12" cy="12" r="10"/>
+                  <line x1="12" y1="8" x2="12" y2="12"/>
+                  <line x1="12" y1="16" x2="12.01" y2="16"/>
+                </svg>
+              </div>
+              <div class="stat-info">
+                <span class="stat-value" id="statDLQ">0</span>
+                <span class="stat-label">Dead Letters</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Charts Row -->
+          <div class="charts-row">
+            <div class="chart-card">
+              <div class="chart-header">
+                <h3>Message Throughput</h3>
+                <div class="chart-legend">
+                  <span class="legend-item"><span class="legend-dot blue"></span>Published</span>
+                  <span class="legend-item"><span class="legend-dot green"></span>Delivered</span>
+                </div>
+              </div>
+              <div class="chart-body">
+                <canvas id="throughputChart"></canvas>
+              </div>
+            </div>
+            <div class="chart-card">
+              <div class="chart-header">
+                <h3>Messages by Topic</h3>
+              </div>
+              <div class="chart-body">
+                <canvas id="topicsChart"></canvas>
+              </div>
+            </div>
+          </div>
+
+          <!-- Live Feed and Top Topics -->
+          <div class="split-row">
+            <div class="card live-feed-card">
+              <div class="card-header">
+                <h3>Live Message Feed</h3>
+                <div class="card-actions">
+                  <label class="toggle-switch">
+                    <input type="checkbox" id="autoScrollCheck" checked>
+                    <span class="toggle-slider"></span>
+                  </label>
+                  <span class="toggle-label">Auto-scroll</span>
+                  <button class="btn btn-sm btn-ghost" id="clearFeedBtn">Clear</button>
+                </div>
+              </div>
+              <div class="card-body">
+                <div class="message-feed" id="liveFeed">
+                  <div class="empty-state">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <circle cx="12" cy="12" r="10"/>
+                      <polyline points="12 6 12 12 16 14"/>
+                    </svg>
+                    <p>Waiting for messages...</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="card top-topics-card">
+              <div class="card-header">
+                <h3>Top Topics</h3>
+              </div>
+              <div class="card-body">
+                <div class="top-topics-list" id="topTopicsList">
+                  <div class="empty-state small">No topics yet</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Topics View -->
+        <div class="view" id="view-topics">
+          <div class="view-header">
+            <div class="search-bar">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="11" cy="11" r="8"/>
+                <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+              </svg>
+              <input type="text" id="topicSearch" placeholder="Search topics...">
+            </div>
+            <button class="btn btn-primary" id="createTopicBtn2">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="12" y1="5" x2="12" y2="19"/>
+                <line x1="5" y1="12" x2="19" y2="12"/>
+              </svg>
+              Create Topic
+            </button>
+          </div>
+          <div class="topics-grid" id="topicsGrid">
+            <!-- Topics will be rendered here -->
+          </div>
+        </div>
+
+        <!-- Messages View -->
+        <div class="view" id="view-messages">
+          <div class="view-header">
+            <div class="search-bar large">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="11" cy="11" r="8"/>
+                <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+              </svg>
+              <input type="text" id="messageSearch" placeholder="Search messages by content, topic, or publisher...">
+            </div>
+            <div class="filter-group">
+              <select id="topicFilter" class="select">
+                <option value="">All Topics</option>
+              </select>
+              <select id="timeFilter" class="select">
+                <option value="1h">Last Hour</option>
+                <option value="24h" selected>Last 24 Hours</option>
+                <option value="7d">Last 7 Days</option>
+                <option value="all">All Time</option>
+              </select>
+            </div>
+          </div>
+          <div class="messages-table-container">
+            <table class="data-table" id="messagesTable">
+              <thead>
+                <tr>
+                  <th>Timestamp</th>
+                  <th>Topic</th>
+                  <th>Publisher</th>
+                  <th>Payload</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="messagesTableBody">
+                <!-- Messages will be rendered here -->
+              </tbody>
+            </table>
+          </div>
+          <div class="pagination" id="messagesPagination">
+            <!-- Pagination will be rendered here -->
+          </div>
+        </div>
+
+        <!-- Subscribers View -->
+        <div class="view" id="view-subscribers">
+          <div class="subscribers-grid" id="subscribersGrid">
+            <!-- Subscribers will be rendered here -->
+          </div>
+        </div>
+
+        <!-- Consumer Groups View -->
+        <div class="view" id="view-consumer-groups">
+          <div class="view-header">
+            <h2>Consumer Groups</h2>
+            <button class="btn btn-primary" id="createGroupBtn">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="12" y1="5" x2="12" y2="19"/>
+                <line x1="5" y1="12" x2="19" y2="12"/>
+              </svg>
+              Create Group
+            </button>
+          </div>
+          <div class="consumer-groups-grid" id="consumerGroupsGrid">
+            <!-- Consumer groups will be rendered here -->
+          </div>
+        </div>
+
+        <!-- Dead Letter Queue View -->
+        <div class="view" id="view-dlq">
+          <div class="dlq-header">
+            <div class="dlq-stats">
+              <div class="dlq-stat">
+                <span class="dlq-stat-value" id="dlqCount">0</span>
+                <span class="dlq-stat-label">Failed Messages</span>
+              </div>
+            </div>
+            <button class="btn btn-warning" id="retryAllDlqBtn">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="23 4 23 10 17 10"/>
+                <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+              </svg>
+              Retry All
+            </button>
+          </div>
+          <div class="dlq-list" id="dlqList">
+            <!-- DLQ messages will be rendered here -->
+          </div>
+        </div>
+
+        <!-- Publish View -->
+        <div class="view" id="view-publish">
+          <div class="publish-container">
+            <div class="card publish-card">
+              <div class="card-header">
+                <h3>Publish Message</h3>
+              </div>
+              <div class="card-body">
+                <form id="publishForm" class="publish-form">
+                  <div class="form-group">
+                    <label for="pubTopic">Topic</label>
+                    <div class="input-with-suggestions">
+                      <input type="text" id="pubTopic" placeholder="e.g., orders.created" required>
+                      <div class="suggestions" id="topicSuggestions"></div>
+                    </div>
+                  </div>
+                  <div class="form-group">
+                    <label for="pubPayload">Payload (JSON)</label>
+                    <textarea id="pubPayload" rows="10" placeholder='{"key": "value"}'></textarea>
+                    <div class="json-validation" id="jsonValidation"></div>
+                  </div>
+                  <div class="form-row">
+                    <div class="form-group">
+                      <label for="pubHeaders">Headers (optional)</label>
+                      <input type="text" id="pubHeaders" placeholder='{"x-correlation-id": "123"}'>
+                    </div>
+                    <div class="form-group">
+                      <label for="pubTTL">TTL (ms, optional)</label>
+                      <input type="number" id="pubTTL" placeholder="60000">
+                    </div>
+                  </div>
+                  <div class="form-actions">
+                    <button type="button" class="btn" id="previewBtn">Preview</button>
+                    <button type="submit" class="btn btn-primary btn-lg">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="22" y1="2" x2="11" y2="13"/>
+                        <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+                      </svg>
+                      Publish Message
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+            <div class="card publish-history-card">
+              <div class="card-header">
+                <h3>Recent Publishes</h3>
+              </div>
+              <div class="card-body">
+                <div class="publish-history" id="publishHistory">
+                  <div class="empty-state small">No recent publishes</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- API Keys View -->
+        <div class="view" id="view-api-keys">
+          <div class="view-header">
+            <h2>API Keys</h2>
+            <button class="btn btn-primary" id="createApiKeyBtn">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="12" y1="5" x2="12" y2="19"/>
+                <line x1="5" y1="12" x2="19" y2="12"/>
+              </svg>
+              Create API Key
+            </button>
+          </div>
+          <div class="api-keys-list" id="apiKeysList">
+            <!-- API keys will be rendered here -->
+          </div>
+        </div>
+
+        <!-- Settings View -->
+        <div class="view" id="view-settings">
+          <div class="settings-grid">
+            <div class="card settings-card">
+              <div class="card-header">
+                <h3>General Settings</h3>
+              </div>
+              <div class="card-body">
+                <div class="setting-item">
+                  <div class="setting-info">
+                    <span class="setting-name">Dark Mode</span>
+                    <span class="setting-desc">Enable dark theme for the dashboard</span>
+                  </div>
+                  <label class="toggle-switch">
+                    <input type="checkbox" id="darkModeToggle" checked>
+                    <span class="toggle-slider"></span>
+                  </label>
+                </div>
+                <div class="setting-item">
+                  <div class="setting-info">
+                    <span class="setting-name">Auto Refresh</span>
+                    <span class="setting-desc">Automatically refresh metrics every 5 seconds</span>
+                  </div>
+                  <label class="toggle-switch">
+                    <input type="checkbox" id="autoRefreshToggle" checked>
+                    <span class="toggle-slider"></span>
+                  </label>
+                </div>
+                <div class="setting-item">
+                  <div class="setting-info">
+                    <span class="setting-name">Notifications</span>
+                    <span class="setting-desc">Show browser notifications for new messages</span>
+                  </div>
+                  <label class="toggle-switch">
+                    <input type="checkbox" id="notificationsToggle">
+                    <span class="toggle-slider"></span>
+                  </label>
+                </div>
+              </div>
+            </div>
+            <div class="card settings-card">
+              <div class="card-header">
+                <h3>Message Retention</h3>
+              </div>
+              <div class="card-body">
+                <div class="form-group">
+                  <label>Default Retention Period</label>
+                  <select id="retentionPeriod" class="select">
+                    <option value="3600000">1 Hour</option>
+                    <option value="86400000" selected>24 Hours</option>
+                    <option value="604800000">7 Days</option>
+                    <option value="2592000000">30 Days</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label>Max Queue Size per Subscriber</label>
+                  <input type="number" id="maxQueueSize" value="1000">
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- Modals -->
+  <div class="modal" id="createTopicModal">
+    <div class="modal-backdrop"></div>
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3>Create New Topic</h3>
+        <button class="modal-close">&times;</button>
+      </div>
+      <form id="createTopicForm">
+        <div class="modal-body">
+          <div class="form-group">
+            <label>Topic Name</label>
+            <input type="text" id="newTopicName" placeholder="e.g., orders.created" required pattern="[a-zA-Z0-9._-]+">
+            <small>Use dots to create hierarchies (e.g., orders.created, orders.updated)</small>
+          </div>
+          <div class="form-group">
+            <label>Description (optional)</label>
+            <textarea id="newTopicDesc" rows="2" placeholder="What is this topic for?"></textarea>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Max Queue Size</label>
+              <input type="number" id="newTopicQueueSize" value="1000" min="1">
+            </div>
+            <div class="form-group">
+              <label>Retention (hours)</label>
+              <input type="number" id="newTopicRetention" value="24" min="1">
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Tags (comma-separated)</label>
+            <input type="text" id="newTopicTags" placeholder="production, orders, critical">
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn modal-cancel">Cancel</button>
+          <button type="submit" class="btn btn-primary">Create Topic</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="modal" id="messageDetailModal">
+    <div class="modal-backdrop"></div>
+    <div class="modal-dialog modal-lg">
+      <div class="modal-header">
+        <h3>Message Details</h3>
+        <button class="modal-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="message-detail" id="messageDetailContent">
+          <!-- Message details will be rendered here -->
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" id="copyMessageBtn">Copy JSON</button>
+        <button class="btn btn-primary" id="republishBtn">Republish</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Container -->
+  <div class="toast-container" id="toastContainer"></div>
+
+  <script src="/app.js"></script>
+</body>
+</html>
