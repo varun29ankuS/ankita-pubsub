@@ -23,6 +23,10 @@ class PubSubDashboard {
     this.currentView = 'overview';
     this.startTime = Date.now();
 
+    // Auth state
+    this.isAuthenticated = false;
+    this.currentUser = null;
+
     // Charts
     this.throughputChart = null;
     this.topicsChart = null;
@@ -36,6 +40,32 @@ class PubSubDashboard {
   }
 
   async init() {
+    // Setup login event listeners first
+    this.setupLoginEventListeners();
+
+    // Check if user is already logged in (session storage)
+    const savedSession = sessionStorage.getItem('ankita-session');
+    if (savedSession) {
+      try {
+        const session = JSON.parse(savedSession);
+        this.currentUser = session.user;
+        this.isAuthenticated = true;
+        this.showDashboard();
+      } catch (e) {
+        sessionStorage.removeItem('ankita-session');
+      }
+    }
+
+    // If not authenticated, wait for login
+    if (!this.isAuthenticated) {
+      return;
+    }
+
+    // Initialize dashboard
+    await this.initDashboard();
+  }
+
+  async initDashboard() {
     // Get demo API keys first, before connecting
     await this.fetchApiKeys();
 
@@ -60,6 +90,192 @@ class PubSubDashboard {
 
     // Load saved settings
     this.loadSettings();
+
+    // Setup user menu
+    this.setupUserMenu();
+  }
+
+  // ============================================
+  // Authentication Methods
+  // ============================================
+
+  setupLoginEventListeners() {
+    const loginForm = document.getElementById('loginForm');
+    if (loginForm) {
+      loginForm.addEventListener('submit', (e) => {
+        e.preventDefault();
+        this.handleLogin();
+      });
+    }
+
+    // SSO buttons
+    document.getElementById('ssoGoogleBtn')?.addEventListener('click', () => this.handleSSOLogin('google'));
+    document.getElementById('ssoMicrosoftBtn')?.addEventListener('click', () => this.handleSSOLogin('microsoft'));
+    document.getElementById('ssoGithubBtn')?.addEventListener('click', () => this.handleSSOLogin('github'));
+  }
+
+  async handleLogin() {
+    const email = document.getElementById('loginEmail')?.value;
+    const password = document.getElementById('loginPassword')?.value;
+
+    if (!email || !password) {
+      this.showLoginError('Please enter email and password');
+      return;
+    }
+
+    // Demo credentials check
+    if (email === 'admin@ankita.io' && password === 'admin123') {
+      this.currentUser = {
+        id: 'admin-001',
+        email: email,
+        name: 'Admin User',
+        role: 'admin'
+      };
+      this.isAuthenticated = true;
+
+      // Save session
+      sessionStorage.setItem('ankita-session', JSON.stringify({
+        user: this.currentUser,
+        timestamp: Date.now()
+      }));
+
+      this.showDashboard();
+      await this.initDashboard();
+    } else {
+      // Try server-side authentication
+      try {
+        const response = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password })
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          this.currentUser = data.user;
+          this.isAuthenticated = true;
+
+          sessionStorage.setItem('ankita-session', JSON.stringify({
+            user: this.currentUser,
+            token: data.token,
+            timestamp: Date.now()
+          }));
+
+          this.showDashboard();
+          await this.initDashboard();
+        } else {
+          this.showLoginError('Invalid email or password');
+        }
+      } catch (error) {
+        // If server auth fails, check demo credentials again
+        this.showLoginError('Invalid email or password');
+      }
+    }
+  }
+
+  async handleSSOLogin(provider) {
+    // For demo, show info message
+    this.showLoginError(`SSO with ${provider} requires configuration. Use demo credentials for now.`);
+
+    // In production, redirect to SSO endpoint
+    // window.location.href = `/api/sso/${provider}/authorize`;
+  }
+
+  showLoginError(message) {
+    let errorEl = document.querySelector('.login-error');
+    if (!errorEl) {
+      errorEl = document.createElement('div');
+      errorEl.className = 'login-error';
+      const form = document.getElementById('loginForm');
+      form?.insertBefore(errorEl, form.firstChild);
+    }
+    errorEl.textContent = message;
+    errorEl.classList.add('show');
+
+    setTimeout(() => {
+      errorEl.classList.remove('show');
+    }, 5000);
+  }
+
+  showDashboard() {
+    document.getElementById('loginScreen').style.display = 'none';
+    document.getElementById('mainApp').style.display = 'flex';
+
+    // Update user info in header
+    this.updateUserInfo();
+  }
+
+  hideDashboard() {
+    document.getElementById('loginScreen').style.display = 'flex';
+    document.getElementById('mainApp').style.display = 'none';
+  }
+
+  updateUserInfo() {
+    if (!this.currentUser) return;
+
+    const userName = document.getElementById('userName');
+    const userEmail = document.getElementById('userEmail');
+    const userAvatar = document.getElementById('userAvatar');
+
+    if (userName) userName.textContent = this.currentUser.name || 'User';
+    if (userEmail) userEmail.textContent = this.currentUser.email || '';
+    if (userAvatar) {
+      const initials = (this.currentUser.name || this.currentUser.email || 'U')
+        .split(' ')
+        .map(n => n[0])
+        .join('')
+        .toUpperCase()
+        .substring(0, 2);
+      userAvatar.textContent = initials;
+    }
+  }
+
+  setupUserMenu() {
+    const userMenuBtn = document.getElementById('userMenuBtn');
+    const userDropdown = document.getElementById('userDropdown');
+    const logoutBtn = document.getElementById('logoutBtn');
+
+    if (userMenuBtn && userDropdown) {
+      userMenuBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        userDropdown.classList.toggle('open');
+      });
+
+      // Close dropdown when clicking outside
+      document.addEventListener('click', () => {
+        userDropdown.classList.remove('open');
+      });
+
+      userDropdown.addEventListener('click', (e) => {
+        e.stopPropagation();
+      });
+    }
+
+    if (logoutBtn) {
+      logoutBtn.addEventListener('click', () => this.logout());
+    }
+  }
+
+  logout() {
+    // Clear session
+    sessionStorage.removeItem('ankita-session');
+    this.isAuthenticated = false;
+    this.currentUser = null;
+
+    // Disconnect WebSocket
+    if (this.ws) {
+      this.ws.close();
+      this.ws = null;
+    }
+
+    // Show login screen
+    this.hideDashboard();
+
+    // Clear form
+    const loginEmail = document.getElementById('loginEmail');
+    const loginPassword = document.getElementById('loginPassword');
+    if (loginEmail) loginEmail.value = '';
+    if (loginPassword) loginPassword.value = '';
   }
 
   async fetchApiKeys() {
