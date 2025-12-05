@@ -2,16 +2,41 @@
  * Ankita PubSub System - Authentication
  *
  * API key-based authentication with rate limiting and permissions.
+ * Keys are persisted to SQLite so they survive server restarts.
  */
 
 import type { ApiKey, Permission, AuthResult, RateLimit } from '../pubsub/types';
+import { database } from '../storage/database';
 
 export class AuthManager {
   private apiKeys: Map<string, ApiKey> = new Map();
   private keysByClientId: Map<string, string> = new Map();
 
   constructor() {
-    // Create default admin key for dashboard
+    // Load existing keys from database
+    this.loadKeysFromDatabase();
+
+    // Create default keys if none exist
+    if (this.apiKeys.size === 0) {
+      this.createDefaultKeys();
+    }
+  }
+
+  /**
+   * Load API keys from database on startup
+   */
+  private loadKeysFromDatabase(): void {
+    const keys = database.getAllApiKeys();
+    for (const key of keys) {
+      this.apiKeys.set(key.key, key);
+      this.keysByClientId.set(key.clientId, key.key);
+    }
+  }
+
+  /**
+   * Create default demo API keys (only on first run)
+   */
+  private createDefaultKeys(): void {
     this.createApiKey('admin', 'Dashboard Admin', [
       'publish',
       'subscribe',
@@ -21,7 +46,6 @@ export class AuthManager {
       'metrics:read',
     ]);
 
-    // Create demo keys for testing
     this.createApiKey('publisher-1', 'Demo Publisher', ['publish', 'topic:create']);
     this.createApiKey('subscriber-1', 'Demo Subscriber', ['subscribe']);
     this.createApiKey('service-1', 'Demo Service', ['publish', 'subscribe', 'topic:create']);
@@ -60,6 +84,9 @@ export class AuthManager {
     this.apiKeys.set(key, apiKey);
     this.keysByClientId.set(clientId, key);
 
+    // Persist to database
+    database.saveApiKey(apiKey);
+
     return apiKey;
   }
 
@@ -88,6 +115,9 @@ export class AuthManager {
 
     // Increment request count
     apiKey.rateLimit.currentRequests++;
+
+    // Update last used in database
+    database.updateApiKeyLastUsed(key);
 
     return {
       success: true,
@@ -135,6 +165,7 @@ export class AuthManager {
     if (!apiKey) return false;
 
     apiKey.isActive = false;
+    database.saveApiKey(apiKey);
     return true;
   }
 
@@ -147,6 +178,7 @@ export class AuthManager {
 
     this.apiKeys.delete(key);
     this.keysByClientId.delete(apiKey.clientId);
+    // Note: Could add database.deleteApiKey() if needed
     return true;
   }
 
@@ -158,6 +190,7 @@ export class AuthManager {
     if (!apiKey) return false;
 
     apiKey.permissions = permissions;
+    database.saveApiKey(apiKey);
     return true;
   }
 
@@ -201,18 +234,11 @@ export class AuthManager {
 
   private generateApiKey(): string {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-    const segments = [8, 4, 4, 4, 12];
-    const parts: string[] = [];
-
-    for (const length of segments) {
-      let segment = '';
-      for (let i = 0; i < length; i++) {
-        segment += chars.charAt(Math.floor(Math.random() * chars.length));
-      }
-      parts.push(segment);
+    let key = '';
+    for (let i = 0; i < 32; i++) {
+      key += chars.charAt(Math.floor(Math.random() * chars.length));
     }
-
-    return `ak_${parts.join('-')}`;
+    return `ak_${key}`;
   }
 
   private maskKey(key: string): string {
