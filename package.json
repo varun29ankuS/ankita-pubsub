@@ -1,12 +1,16 @@
 {
   "name": "ankita-pubsub",
   "version": "1.0.0",
-  "description": "PubSub messaging system with dashboard - Ankita",
+  "description": "Enterprise PubSub messaging system with dashboard - Ankita",
   "type": "module",
   "scripts": {
     "dev": "bun --watch src/index.ts",
     "start": "bun src/index.ts",
-    "demo": "bun src/demo/simulator.ts"
+    "demo": "bun src/demo/simulator.ts",
+    "test": "bun test",
+    "test:unit": "bun test tests/broker.test.ts tests/auth.test.ts",
+    "test:integration": "bun test tests/health.test.ts",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {},
   "devDependencies": {

@@ -9,15 +9,29 @@ import type { ServerWebSocket } from 'bun';
 import type { WSMessage, WSClient, Message } from './pubsub/types';
 import { broker } from './pubsub/broker';
 import { authManager } from './auth/auth';
-import { logger } from './utils/logger';
+import { logger as oldLogger } from './utils/logger';
 import { consumerGroupManager } from './pubsub/consumer-group';
+import { config, validateConfig, getConfigSummary } from './config';
+import { logger, createRequestLogger, generateCorrelationId } from './logging';
+import { metrics, timeRequest } from './metrics';
+import { health, healthResponse } from './health';
+import { audit } from './audit';
+
+// Backwards compatible logger wrapper
+const legacyLogger = {
+  ...oldLogger,
+  info: (msg: string, ctx?: Record<string, unknown>) => logger.info(msg, ctx),
+  warn: (msg: string, ctx?: Record<string, unknown>) => logger.warn(msg, ctx),
+  error: (msg: string, err?: unknown, ctx?: Record<string, unknown>) => logger.error(msg, err, ctx),
+  debug: (msg: string, ctx?: Record<string, unknown>) => logger.debug(msg, ctx),
+};
 
 // ============================================
 // Configuration
 // ============================================
 
-const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3000;
-const HOST = process.env.HOST || 'localhost';
+const PORT = config.server.port;
+const HOST = config.server.host;
 
 // ============================================
 // WebSocket Client Management
@@ -123,8 +137,11 @@ function handleAuth(ws: ServerWebSocket<WSClient>, data: WSMessage): void {
       payload: { success: true, clientId: result.clientId, permissions: result.permissions },
     });
     logger.info(`Client authenticated: ${result.clientId}`);
+    audit.authSuccess(result.clientId!);
+    metrics.inc('ankita_messages_delivered_total', 1, { topic: 'auth' });
   } else {
     sendWS(ws, { type: 'error', error: result.error });
+    audit.authFailure(result.error || 'Unknown error');
   }
 }
 
@@ -195,6 +212,9 @@ function handlePublish(ws: ServerWebSocket<WSClient>, data: WSMessage): void {
   }
 
   const message = broker.publish(data.topic, data.payload, ws.data.clientId!);
+
+  // Track metrics
+  metrics.inc('ankita_messages_published_total', 1, { topic: data.topic });
 
   sendWS(ws, { type: 'publish', payload: { messageId: message.id, topic: data.topic } });
 
@@ -280,6 +300,7 @@ function handleTopicCreate(ws: ServerWebSocket<WSClient>, data: WSMessage): void
   try {
     const topic = broker.createTopic(topicName, ws.data.clientId!);
     sendWS(ws, { type: 'topic:create', payload: topic });
+    audit.topicCreated(ws.data.clientId!, topicName);
     broadcastMetrics();
   } catch (error) {
     sendWS(ws, {
@@ -302,6 +323,9 @@ function handleTopicDelete(ws: ServerWebSocket<WSClient>, data: WSMessage): void
   }
 
   const deleted = broker.deleteTopic(topicName);
+  if (deleted) {
+    audit.topicDeleted(ws.data.clientId!, topicName);
+  }
   sendWS(ws, { type: 'topic:delete', payload: { deleted, topic: topicName } });
   broadcastMetrics();
 }
@@ -459,6 +483,19 @@ function handleHTTPRequest(req: Request): Response {
     return serveStaticFile('public/app.js', 'application/javascript', corsHeaders);
   }
 
+  if (path === '/openapi.yaml' || path === '/api/openapi') {
+    return serveStaticFile('public/openapi.yaml', 'application/x-yaml', corsHeaders);
+  }
+
+  // Health and metrics endpoints (public, no /api prefix needed)
+  if (path === '/health' || path === '/health/live' || path === '/health/ready') {
+    return handleAPIRequest(req, path, corsHeaders);
+  }
+
+  if (path === '/metrics') {
+    return handleAPIRequest(req, path, corsHeaders);
+  }
+
   // API routes
   if (path.startsWith('/api/')) {
     return handleAPIRequest(req, path, corsHeaders);
@@ -489,9 +526,28 @@ async function handleAPIRequest(
 ): Promise<Response> {
   const apiKey = req.headers.get('X-API-Key') || req.headers.get('Authorization')?.replace('Bearer ', '');
 
-  // Public endpoints
-  if (path === '/api/health') {
-    return Response.json({ status: 'ok', timestamp: Date.now() }, { headers });
+  // Public endpoints - Health checks
+  if (path === config.health.livenessPath || path === '/health/live') {
+    const status = await health.liveness();
+    return healthResponse(status);
+  }
+
+  if (path === config.health.readinessPath || path === '/health/ready') {
+    const status = await health.readiness();
+    return healthResponse(status);
+  }
+
+  if (path === '/health' || path === '/api/health') {
+    const status = await health.detailed();
+    return healthResponse(status);
+  }
+
+  // Prometheus metrics endpoint
+  if (path === config.metrics.path || path === '/metrics') {
+    const metricsText = metrics.format();
+    return new Response(metricsText, {
+      headers: { ...headers, 'Content-Type': 'text/plain; charset=utf-8' },
+    });
   }
 
   if (path === '/api/keys/demo') {
@@ -687,14 +743,72 @@ broker.on((event) => {
 });
 
 // ============================================
+// Graceful Shutdown
+// ============================================
+
+let isShuttingDown = false;
+
+async function gracefulShutdown(signal: string): Promise<void> {
+  if (isShuttingDown) return;
+  isShuttingDown = true;
+
+  logger.info(`Received ${signal}, starting graceful shutdown...`);
+
+  // Mark service as not ready
+  health.setReady(false);
+
+  // Give time for health checks to propagate
+  await new Promise((resolve) => setTimeout(resolve, 5000));
+
+  // Close all WebSocket connections
+  logger.info('Closing WebSocket connections...');
+  for (const client of wsClients.values()) {
+    try {
+      client.ws.close(1001, 'Server shutting down');
+    } catch {
+      // Client may already be disconnected
+    }
+  }
+
+  // Stop the server
+  logger.info('Stopping HTTP server...');
+  server.stop();
+
+  logger.info('Shutdown complete');
+  process.exit(0);
+}
+
+// Register shutdown handlers
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
+// ============================================
 // Startup
 // ============================================
 
-logger.section('Ankita PubSub Server');
-logger.info(`Server running at http://${HOST}:${PORT}`);
-logger.info(`WebSocket endpoint: ws://${HOST}:${PORT}`);
+// Validate configuration in production
+const configErrors = validateConfig();
+if (configErrors.length > 0) {
+  for (const error of configErrors) {
+    logger.error(`Configuration error: ${error}`);
+  }
+  if (config.server.env === 'production') {
+    process.exit(1);
+  }
+}
+
+oldLogger.section('Ankita PubSub Server');
+logger.info('Server starting', {
+  host: HOST,
+  port: PORT,
+  environment: config.server.env,
+});
+logger.info(`HTTP: http://${HOST}:${PORT}`);
+logger.info(`WebSocket: ws://${HOST}:${PORT}`);
 logger.info(`Dashboard: http://${HOST}:${PORT}/`);
-logger.separator();
+logger.info(`Metrics: http://${HOST}:${PORT}${config.metrics.path}`);
+logger.info(`Health: http://${HOST}:${PORT}${config.health.readinessPath}`);
+oldLogger.separator();
 
 // Create some default topics
 broker.createTopic('system.events', 'system');
@@ -703,7 +817,7 @@ broker.createTopic('orders.updated', 'system');
 broker.createTopic('notifications', 'system');
 
 logger.info('Default topics created');
-logger.separator();
+oldLogger.separator();
 
 // Log demo API keys
 logger.info('Demo API Keys:');
@@ -711,6 +825,10 @@ const demoKeys = authManager.getAllKeys();
 for (const key of demoKeys) {
   logger.info(`  ${key.name}: ${key.key}`);
 }
-logger.separator();
+oldLogger.separator();
+
+// Mark service as ready
+health.setReady(true);
+logger.info('Service ready to accept connections');
 
 export { server };

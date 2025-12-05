@@ -34,11 +34,15 @@ class PubSubDashboard {
   }
 
   async init() {
-    // Get demo API keys
+    // Get demo API keys first, before connecting
     await this.fetchApiKeys();
 
-    // Connect WebSocket
-    this.connect();
+    // Only connect WebSocket after we have API keys
+    if (this.apiKey) {
+      this.connect();
+    } else {
+      console.error('No API key available, cannot connect');
+    }
 
     // Setup event listeners
     this.setupEventListeners();
@@ -97,8 +101,10 @@ class PubSubDashboard {
       this.updateConnectionStatus('disconnected');
       this.isConnected = false;
 
-      // Reconnect after 3 seconds
-      setTimeout(() => this.connect(), 3000);
+      // Reconnect after 3 seconds if we have an API key
+      if (this.apiKey) {
+        setTimeout(() => this.connect(), 3000);
+      }
     };
 
     this.ws.onerror = (error) => {
@@ -868,7 +874,11 @@ class PubSubDashboard {
       'dlq': 'Dead Letter Queue',
       'publish': 'Publish Message',
       'api-keys': 'API Keys',
-      'settings': 'Settings'
+      'settings': 'Settings',
+      'health': 'Health Status',
+      'metrics': 'Prometheus Metrics',
+      'system': 'System Info',
+      'audit': 'Audit Log'
     };
     document.getElementById('pageTitle').textContent = titles[view] || 'Dashboard';
 
@@ -887,6 +897,9 @@ class PubSubDashboard {
     } else if (view === 'dlq') {
       this.send({ type: 'dlq:list' });
     }
+
+    // Handle enterprise views
+    this.onViewSwitch(view);
   }
 
   // Event Listeners
@@ -1189,7 +1202,220 @@ class PubSubDashboard {
     this.showToast('Reply received', 'success');
     console.log('Reply:', data.payload);
   }
+
+  // ============================================
+  // Enterprise Features - Health, Metrics, System, Audit
+  // ============================================
+
+  async loadHealthStatus() {
+    try {
+      const response = await fetch('/health');
+      const data = await response.json();
+
+      // Update health status card
+      const statusIcon = document.getElementById('healthStatusIcon');
+      const statusText = document.getElementById('healthStatusText');
+      const statusUptime = document.getElementById('healthStatusUptime');
+      const healthBadge = document.getElementById('healthBadge');
+
+      if (statusIcon && statusText) {
+        statusIcon.className = `health-status-icon ${data.status}`;
+        statusText.textContent = data.status.charAt(0).toUpperCase() + data.status.slice(1);
+
+        // Update icon based on status
+        if (data.status === 'healthy') {
+          statusIcon.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+            <polyline points="22 4 12 14.01 9 11.01"/>
+          </svg>`;
+        } else if (data.status === 'degraded') {
+          statusIcon.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/>
+            <line x1="12" y1="8" x2="12" y2="12"/>
+            <line x1="12" y1="16" x2="12.01" y2="16"/>
+          </svg>`;
+        } else {
+          statusIcon.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/>
+            <line x1="15" y1="9" x2="9" y2="15"/>
+            <line x1="9" y1="9" x2="15" y2="15"/>
+          </svg>`;
+        }
+      }
+
+      if (statusUptime) {
+        statusUptime.textContent = `Uptime: ${this.formatUptime(data.uptime * 1000)}`;
+      }
+
+      if (healthBadge) {
+        healthBadge.textContent = data.status === 'healthy' ? 'OK' : data.status.toUpperCase();
+        healthBadge.className = `nav-badge ${data.status === 'healthy' ? 'success' : data.status === 'degraded' ? 'warning' : ''}`;
+      }
+
+      // Render health checks
+      const checksGrid = document.getElementById('healthChecksGrid');
+      if (checksGrid && data.checks) {
+        checksGrid.innerHTML = data.checks.map(check => `
+          <div class="health-check-card">
+            <div class="health-check-status ${check.status}"></div>
+            <div class="health-check-info">
+              <h4>${check.name}</h4>
+              <p>${check.message || ''}</p>
+            </div>
+            ${check.duration ? `<span class="health-check-duration">${check.duration}ms</span>` : ''}
+          </div>
+        `).join('');
+      }
+    } catch (error) {
+      console.error('Failed to load health status:', error);
+    }
+  }
+
+  async loadMetricsPreview() {
+    try {
+      const response = await fetch('/metrics');
+      const text = await response.text();
+
+      const preview = document.getElementById('metricsPreview');
+      if (preview) {
+        // Show first 50 lines
+        const lines = text.split('\n').slice(0, 50);
+        preview.textContent = lines.join('\n') + '\n...';
+      }
+    } catch (error) {
+      console.error('Failed to load metrics:', error);
+      const preview = document.getElementById('metricsPreview');
+      if (preview) {
+        preview.textContent = 'Failed to load metrics';
+      }
+    }
+  }
+
+  updateSystemInfo(metrics) {
+    if (!metrics) return;
+
+    // Update uptime
+    const sysUptime = document.getElementById('sysUptime');
+    if (sysUptime) {
+      sysUptime.textContent = this.formatUptime(metrics.uptime);
+    }
+
+    // Update memory bars
+    const maxMem = 512 * 1024 * 1024; // Assume 512MB max for display purposes
+
+    const heapUsed = metrics.memoryUsage?.heapUsed || 0;
+    const heapTotal = metrics.memoryUsage?.heapTotal || 0;
+    const rss = metrics.memoryUsage?.rss || 0;
+
+    const memHeapUsed = document.getElementById('memHeapUsed');
+    const memHeapTotal = document.getElementById('memHeapTotal');
+    const memRss = document.getElementById('memRss');
+    const memHeapUsedBar = document.getElementById('memHeapUsedBar');
+    const memHeapTotalBar = document.getElementById('memHeapTotalBar');
+    const memRssBar = document.getElementById('memRssBar');
+
+    if (memHeapUsed) memHeapUsed.textContent = this.formatBytes(heapUsed);
+    if (memHeapTotal) memHeapTotal.textContent = this.formatBytes(heapTotal);
+    if (memRss) memRss.textContent = this.formatBytes(rss);
+
+    if (memHeapUsedBar) memHeapUsedBar.style.width = `${Math.min(100, (heapUsed / maxMem) * 100)}%`;
+    if (memHeapTotalBar) memHeapTotalBar.style.width = `${Math.min(100, (heapTotal / maxMem) * 100)}%`;
+    if (memRssBar) memRssBar.style.width = `${Math.min(100, (rss / maxMem) * 100)}%`;
+  }
+
+  formatBytes(bytes) {
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+  }
+
+  formatUptime(ms) {
+    const seconds = Math.floor(ms / 1000);
+    const minutes = Math.floor(seconds / 60);
+    const hours = Math.floor(minutes / 60);
+    const days = Math.floor(hours / 24);
+
+    if (days > 0) {
+      return `${days}d ${hours % 24}h ${minutes % 60}m`;
+    }
+    if (hours > 0) {
+      return `${hours}h ${minutes % 60}m ${seconds % 60}s`;
+    }
+    if (minutes > 0) {
+      return `${minutes}m ${seconds % 60}s`;
+    }
+    return `${seconds}s`;
+  }
+
+  loadAuditLog() {
+    // For now, show empty state as audit is in-memory on server
+    const tbody = document.getElementById('auditTableBody');
+    const emptyState = document.getElementById('auditEmptyState');
+
+    if (tbody) tbody.innerHTML = '';
+    if (emptyState) emptyState.style.display = 'flex';
+
+    // Update stats
+    const totalEvents = document.getElementById('auditTotalEvents');
+    const failures = document.getElementById('auditFailures');
+    const securityEvents = document.getElementById('auditSecurityEvents');
+
+    if (totalEvents) totalEvents.textContent = '0';
+    if (failures) failures.textContent = '0';
+    if (securityEvents) securityEvents.textContent = '0';
+  }
+
+  setupEnterpriseEventListeners() {
+    // Health refresh button
+    const refreshHealthBtn = document.getElementById('refreshHealthBtn');
+    if (refreshHealthBtn) {
+      refreshHealthBtn.addEventListener('click', () => this.loadHealthStatus());
+    }
+
+    // Metrics refresh button
+    const refreshMetricsBtn = document.getElementById('refreshMetricsBtn');
+    if (refreshMetricsBtn) {
+      refreshMetricsBtn.addEventListener('click', () => this.loadMetricsPreview());
+    }
+
+    // Copy metrics URL button
+    const copyMetricsUrlBtn = document.getElementById('copyMetricsUrlBtn');
+    if (copyMetricsUrlBtn) {
+      copyMetricsUrlBtn.addEventListener('click', () => {
+        this.copyToClipboard(window.location.origin + '/metrics');
+      });
+    }
+
+    // Audit refresh button
+    const refreshAuditBtn = document.getElementById('refreshAuditBtn');
+    if (refreshAuditBtn) {
+      refreshAuditBtn.addEventListener('click', () => this.loadAuditLog());
+    }
+  }
+
+  // Override switchView to handle enterprise views
+  onViewSwitch(viewId) {
+    switch (viewId) {
+      case 'health':
+        this.loadHealthStatus();
+        break;
+      case 'metrics':
+        this.loadMetricsPreview();
+        break;
+      case 'system':
+        // System info is updated with regular metrics
+        break;
+      case 'audit':
+        this.loadAuditLog();
+        break;
+    }
+  }
 }
 
 // Initialize dashboard
 const dashboard = new PubSubDashboard();
+
+// Setup enterprise event listeners after DOM is ready
+document.addEventListener('DOMContentLoaded', () => {
+  dashboard.setupEnterpriseEventListeners();
+});

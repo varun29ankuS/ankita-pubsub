@@ -1,0 +1,499 @@
+openapi: 3.0.3
+info:
+  title: Ankita PubSub API
+  description: |
+    Enterprise-grade publish/subscribe messaging system built with Bun + TypeScript.
+
+    ## Features
+    - Topic-based publish/subscribe messaging
+    - Message queueing for offline subscribers
+    - Request/reply pattern support
+    - API key authentication with rate limiting
+    - Dead letter queue for failed messages
+    - Consumer groups with load balancing
+    - Real-time WebSocket connections
+
+    ## Authentication
+    All protected endpoints require an API key passed via:
+    - `X-API-Key` header
+    - `Authorization: Bearer <key>` header
+
+    ## WebSocket
+    Real-time messaging is available via WebSocket at `ws://host:port/`
+  version: 1.0.0
+  contact:
+    name: Ankita PubSub
+  license:
+    name: MIT
+
+servers:
+  - url: http://localhost:3000
+    description: Development server
+
+tags:
+  - name: Health
+    description: Health check endpoints for Kubernetes
+  - name: Metrics
+    description: Prometheus metrics endpoint
+  - name: Topics
+    description: Topic management
+  - name: Messages
+    description: Message publishing and history
+  - name: Subscribers
+    description: Subscriber management
+  - name: Dead Letter Queue
+    description: Failed message management
+
+paths:
+  /health:
+    get:
+      tags:
+        - Health
+      summary: Detailed health check
+      description: Returns detailed health status including all health checks
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthStatus'
+        '503':
+          description: Service is unhealthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthStatus'
+
+  /health/live:
+    get:
+      tags:
+        - Health
+      summary: Liveness probe
+      description: Kubernetes liveness probe - checks if process is responsive
+      responses:
+        '200':
+          description: Process is alive
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthStatus'
+
+  /health/ready:
+    get:
+      tags:
+        - Health
+      summary: Readiness probe
+      description: Kubernetes readiness probe - checks if service can accept traffic
+      responses:
+        '200':
+          description: Service is ready
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthStatus'
+        '503':
+          description: Service is not ready
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthStatus'
+
+  /metrics:
+    get:
+      tags:
+        - Metrics
+      summary: Prometheus metrics
+      description: Returns metrics in Prometheus text format
+      responses:
+        '200':
+          description: Metrics in Prometheus format
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: |
+                  # HELP ankita_messages_published_total Total number of messages published
+                  # TYPE ankita_messages_published_total counter
+                  ankita_messages_published_total 1234
+
+  /api/topics:
+    get:
+      tags:
+        - Topics
+      summary: List all topics
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: List of topics
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Topic'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    post:
+      tags:
+        - Topics
+      summary: Create a new topic
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - name
+              properties:
+                name:
+                  type: string
+                  description: Topic name
+                  example: orders.created
+                config:
+                  $ref: '#/components/schemas/TopicConfig'
+      responses:
+        '201':
+          description: Topic created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Topic'
+        '400':
+          description: Invalid topic name or topic already exists
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/publish:
+    post:
+      tags:
+        - Messages
+      summary: Publish a message
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - topic
+                - payload
+              properties:
+                topic:
+                  type: string
+                  description: Target topic
+                  example: orders.created
+                payload:
+                  description: Message payload (any JSON value)
+                  example:
+                    orderId: "12345"
+                    amount: 99.99
+                headers:
+                  type: object
+                  additionalProperties:
+                    type: string
+                  description: Optional message headers
+                ttl:
+                  type: integer
+                  description: Time-to-live in milliseconds
+      responses:
+        '200':
+          description: Message published
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  messageId:
+                    type: string
+                    example: "m1a2b3c4d5"
+        '400':
+          description: Missing topic
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/messages/{topic}:
+    get:
+      tags:
+        - Messages
+      summary: Get message history for a topic
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: topic
+          in: path
+          required: true
+          schema:
+            type: string
+          example: orders.created
+      responses:
+        '200':
+          description: Message history
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Message'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/subscribers:
+    get:
+      tags:
+        - Subscribers
+      summary: List all subscribers
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: List of subscribers
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Subscriber'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/dlq:
+    get:
+      tags:
+        - Dead Letter Queue
+      summary: List dead letter queue messages
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Dead letter queue contents
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DeadLetterMessage'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/metrics:
+    get:
+      tags:
+        - Metrics
+      summary: Get broker metrics (JSON)
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Broker metrics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrokerMetrics'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/keys/demo:
+    get:
+      tags:
+        - Topics
+      summary: Get demo API keys
+      description: Returns demo API keys for testing (development only)
+      responses:
+        '200':
+          description: Demo API keys
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  admin:
+                    type: string
+                  publisher:
+                    type: string
+                  subscriber:
+                    type: string
+                  service:
+                    type: string
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+
+  schemas:
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [healthy, degraded, unhealthy]
+        timestamp:
+          type: string
+          format: date-time
+        uptime:
+          type: integer
+          description: Uptime in seconds
+        checks:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              status:
+                type: string
+                enum: [pass, warn, fail]
+              message:
+                type: string
+              duration:
+                type: integer
+
+    Topic:
+      type: object
+      properties:
+        name:
+          type: string
+          example: orders.created
+        createdAt:
+          type: integer
+          description: Unix timestamp
+        createdBy:
+          type: string
+        messageCount:
+          type: integer
+        subscriberCount:
+          type: integer
+        config:
+          $ref: '#/components/schemas/TopicConfig'
+
+    TopicConfig:
+      type: object
+      properties:
+        maxQueueSize:
+          type: integer
+          default: 1000
+        messageRetention:
+          type: integer
+          description: Retention in milliseconds
+          default: 3600000
+        maxRetries:
+          type: integer
+          default: 3
+        retryDelay:
+          type: integer
+          default: 5000
+        requireAck:
+          type: boolean
+          default: false
+
+    Message:
+      type: object
+      properties:
+        id:
+          type: string
+        topic:
+          type: string
+        payload:
+          description: Any JSON value
+        timestamp:
+          type: integer
+        publisherId:
+          type: string
+        headers:
+          type: object
+          additionalProperties:
+            type: string
+        ttl:
+          type: integer
+        correlationId:
+          type: string
+        replyTo:
+          type: string
+
+    Subscriber:
+      type: object
+      properties:
+        id:
+          type: string
+        clientId:
+          type: string
+        topics:
+          type: array
+          items:
+            type: string
+        createdAt:
+          type: integer
+        lastActivity:
+          type: integer
+        isOnline:
+          type: boolean
+        pendingMessages:
+          type: integer
+        deliveredMessages:
+          type: integer
+
+    DeadLetterMessage:
+      type: object
+      properties:
+        id:
+          type: string
+        message:
+          $ref: '#/components/schemas/Message'
+        reason:
+          type: string
+        failedAt:
+          type: integer
+        attempts:
+          type: integer
+
+    BrokerMetrics:
+      type: object
+      properties:
+        uptime:
+          type: integer
+          description: Uptime in milliseconds
+        totalMessages:
+          type: integer
+        messagesPerSecond:
+          type: number
+        activeConnections:
+          type: integer
+        totalTopics:
+          type: integer
+        totalSubscribers:
+          type: integer
+        queuedMessages:
+          type: integer
+        deadLetterCount:
+          type: integer
+        memoryUsage:
+          type: object
+          properties:
+            heapUsed:
+              type: integer
+            heapTotal:
+              type: integer
+            rss:
+              type: integer
+
+  responses:
+    Unauthorized:
+      description: API key required or invalid
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+                example: API key required
