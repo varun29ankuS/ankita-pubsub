@@ -515,8 +515,12 @@ function serveStaticFile(
 ): Response {
   try {
     const file = Bun.file(filePath);
+    // Add no-cache for JS files to prevent stale API key issues after restart
+    const cacheHeaders = filePath.endsWith('.js')
+      ? { 'Cache-Control': 'no-cache, no-store, must-revalidate' }
+      : {};
     return new Response(file, {
-      headers: { ...headers, 'Content-Type': contentType },
+      headers: { ...headers, ...cacheHeaders, 'Content-Type': contentType },
     });
   } catch {
     return new Response('File not found', { status: 404, headers });

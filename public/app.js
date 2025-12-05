@@ -72,6 +72,15 @@ class PubSubDashboard {
     }
   }
 
+  async handleAuthError() {
+    // Re-fetch API keys (server may have restarted with new keys)
+    await this.fetchApiKeys();
+    if (this.apiKey && this.ws && this.ws.readyState === WebSocket.OPEN) {
+      // Retry authentication with new key
+      this.send({ type: 'auth', payload: this.apiKey });
+    }
+  }
+
   connect() {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${protocol}//${window.location.host}`;
@@ -157,7 +166,13 @@ class PubSubDashboard {
 
       case 'error':
         console.error('Server error:', data.error);
-        this.showToast(data.error, 'error');
+        // If auth failed due to invalid key, re-fetch keys and retry
+        if (data.error && data.error.includes('Invalid API key')) {
+          console.log('API key invalid, re-fetching keys...');
+          this.handleAuthError();
+        } else {
+          this.showToast(data.error, 'error');
+        }
         break;
 
       case 'reply':
