@@ -16,6 +16,8 @@ import { logger, createRequestLogger, generateCorrelationId } from './logging';
 import { metrics, timeRequest } from './metrics';
 import { health, healthResponse } from './health';
 import { audit } from './audit';
+import { tenantManager } from './tenant';
+import { ssoManager } from './sso';
 
 // Backwards compatible logger wrapper
 const legacyLogger = {
@@ -649,6 +651,263 @@ async function handleAPIRequest(
     return Response.json(messages, { headers });
   }
 
+  // ============================================
+  // Tenant Management Endpoints
+  // ============================================
+
+  // List all tenants (admin only)
+  if (path === '/api/tenants' && req.method === 'GET') {
+    if (!authManager.hasPermission(apiKey!, 'admin')) {
+      return Response.json({ error: 'Admin permission required' }, { status: 403, headers });
+    }
+    const tenants = tenantManager.getAllTenants();
+    return Response.json(tenants, { headers });
+  }
+
+  // Create tenant (admin only)
+  if (path === '/api/tenants' && req.method === 'POST') {
+    if (!authManager.hasPermission(apiKey!, 'admin')) {
+      return Response.json({ error: 'Admin permission required' }, { status: 403, headers });
+    }
+    const body = await req.json();
+    if (!body.name || !body.slug || !body.email) {
+      return Response.json({ error: 'name, slug, and email are required' }, { status: 400, headers });
+    }
+    const tenant = tenantManager.createTenant(body);
+    audit.log('tenant.created', authResult.clientId!, 'tenant', tenant.id, { name: body.name });
+    return Response.json(tenant, { status: 201, headers });
+  }
+
+  // Get specific tenant
+  if (path.match(/^\/api\/tenants\/[^\/]+$/) && req.method === 'GET') {
+    const tenantId = path.split('/').pop()!;
+    const tenant = tenantManager.getTenant(tenantId) || tenantManager.getTenantBySlug(tenantId);
+    if (!tenant) {
+      return Response.json({ error: 'Tenant not found' }, { status: 404, headers });
+    }
+    return Response.json(tenant, { headers });
+  }
+
+  // Update tenant (admin only)
+  if (path.match(/^\/api\/tenants\/[^\/]+$/) && req.method === 'PUT') {
+    if (!authManager.hasPermission(apiKey!, 'admin')) {
+      return Response.json({ error: 'Admin permission required' }, { status: 403, headers });
+    }
+    const tenantId = path.split('/').pop()!;
+    const body = await req.json();
+    const tenant = tenantManager.updateTenant(tenantId, body);
+    if (!tenant) {
+      return Response.json({ error: 'Tenant not found' }, { status: 404, headers });
+    }
+    audit.log('tenant.updated', authResult.clientId!, 'tenant', tenantId, body);
+    return Response.json(tenant, { headers });
+  }
+
+  // Suspend tenant (admin only)
+  if (path.match(/^\/api\/tenants\/[^\/]+\/suspend$/) && req.method === 'POST') {
+    if (!authManager.hasPermission(apiKey!, 'admin')) {
+      return Response.json({ error: 'Admin permission required' }, { status: 403, headers });
+    }
+    const tenantId = path.split('/')[3];
+    const body = await req.json().catch(() => ({}));
+    const success = tenantManager.suspendTenant(tenantId, body.reason);
+    if (!success) {
+      return Response.json({ error: 'Tenant not found' }, { status: 404, headers });
+    }
+    return Response.json({ success: true }, { headers });
+  }
+
+  // Reactivate tenant (admin only)
+  if (path.match(/^\/api\/tenants\/[^\/]+\/reactivate$/) && req.method === 'POST') {
+    if (!authManager.hasPermission(apiKey!, 'admin')) {
+      return Response.json({ error: 'Admin permission required' }, { status: 403, headers });
+    }
+    const tenantId = path.split('/')[3];
+    const success = tenantManager.reactivateTenant(tenantId);
+    if (!success) {
+      return Response.json({ error: 'Tenant not found' }, { status: 404, headers });
+    }
+    return Response.json({ success: true }, { headers });
+  }
+
+  // Get tenant usage/billing report
+  if (path.match(/^\/api\/tenants\/[^\/]+\/usage$/) && req.method === 'GET') {
+    const tenantId = path.split('/')[3];
+    const report = tenantManager.getUsageReport(tenantId);
+    if (!report) {
+      return Response.json({ error: 'Tenant not found' }, { status: 404, headers });
+    }
+    return Response.json(report, { headers });
+  }
+
+  // Upgrade tenant plan (admin only)
+  if (path.match(/^\/api\/tenants\/[^\/]+\/upgrade$/) && req.method === 'POST') {
+    if (!authManager.hasPermission(apiKey!, 'admin')) {
+      return Response.json({ error: 'Admin permission required' }, { status: 403, headers });
+    }
+    const tenantId = path.split('/')[3];
+    const body = await req.json();
+    if (!body.plan) {
+      return Response.json({ error: 'plan is required' }, { status: 400, headers });
+    }
+    const success = tenantManager.upgradePlan(tenantId, body.plan);
+    if (!success) {
+      return Response.json({ error: 'Cannot upgrade to this plan' }, { status: 400, headers });
+    }
+    return Response.json({ success: true }, { headers });
+  }
+
+  // ============================================
+  // SSO/SAML Endpoints
+  // ============================================
+
+  // Get SSO config for tenant
+  if (path.match(/^\/api\/tenants\/[^\/]+\/sso$/) && req.method === 'GET') {
+    const tenantId = path.split('/')[3];
+    const config = ssoManager.getSSOConfig(tenantId);
+    if (!config) {
+      return Response.json({ error: 'SSO not configured' }, { status: 404, headers });
+    }
+    // Don't expose secrets
+    const safeConfig = { ...config, clientSecret: config.clientSecret ? '****' : undefined };
+    return Response.json(safeConfig, { headers });
+  }
+
+  // Configure SSO for tenant (admin only)
+  if (path.match(/^\/api\/tenants\/[^\/]+\/sso$/) && req.method === 'POST') {
+    if (!authManager.hasPermission(apiKey!, 'admin')) {
+      return Response.json({ error: 'Admin permission required' }, { status: 403, headers });
+    }
+    const tenantId = path.split('/')[3];
+    const body = await req.json();
+    const config = ssoManager.configureSSO(tenantId, body);
+    audit.log('sso.configured', authResult.clientId!, 'tenant', tenantId, { provider: body.provider });
+    return Response.json(config, { headers });
+  }
+
+  // Get SP metadata for SAML
+  if (path.match(/^\/api\/tenants\/[^\/]+\/sso\/metadata$/) && req.method === 'GET') {
+    const tenantId = path.split('/')[3];
+    const baseUrl = new URL(req.url).origin;
+    const metadata = ssoManager.generateSPMetadata(tenantId, baseUrl);
+    return new Response(metadata, {
+      headers: { ...headers, 'Content-Type': 'application/xml' },
+    });
+  }
+
+  // SSO login initiation
+  if (path.match(/^\/api\/tenants\/[^\/]+\/sso\/login$/) && req.method === 'GET') {
+    const tenantId = path.split('/')[3];
+    const url = new URL(req.url);
+    const redirectUrl = url.searchParams.get('redirect') || `${url.origin}/`;
+
+    try {
+      const result = ssoManager.generateLoginUrl(tenantId, redirectUrl);
+      return Response.json(result, { headers });
+    } catch (error) {
+      return Response.json(
+        { error: error instanceof Error ? error.message : 'SSO not configured' },
+        { status: 400, headers }
+      );
+    }
+  }
+
+  // OAuth callback
+  if (path.match(/^\/api\/sso\/callback$/) && req.method === 'GET') {
+    const url = new URL(req.url);
+    const code = url.searchParams.get('code');
+    const state = url.searchParams.get('state');
+
+    if (!code || !state) {
+      return Response.json({ error: 'Invalid callback' }, { status: 400, headers });
+    }
+
+    try {
+      const session = await ssoManager.handleOAuthCallback(code, state);
+      if (!session) {
+        return Response.json({ error: 'Authentication failed' }, { status: 401, headers });
+      }
+
+      // In production, you'd set a cookie or return a token
+      audit.log('sso.login', session.userId, 'session', session.id, { tenantId: session.tenantId });
+      return Response.json({
+        success: true,
+        session: {
+          id: session.id,
+          userId: session.userId,
+          email: session.email,
+          name: session.name,
+          tenantId: session.tenantId,
+        }
+      }, { headers });
+    } catch (error) {
+      return Response.json(
+        { error: error instanceof Error ? error.message : 'OAuth callback failed' },
+        { status: 500, headers }
+      );
+    }
+  }
+
+  // SAML ACS (Assertion Consumer Service)
+  if (path.match(/^\/api\/sso\/saml\/acs$/) && req.method === 'POST') {
+    const formData = await req.formData();
+    const samlResponse = formData.get('SAMLResponse') as string;
+    const relayState = formData.get('RelayState') as string;
+
+    if (!samlResponse) {
+      return Response.json({ error: 'Invalid SAML response' }, { status: 400, headers });
+    }
+
+    try {
+      const session = ssoManager.handleSAMLResponse(samlResponse, relayState);
+      if (!session) {
+        return Response.json({ error: 'SAML authentication failed' }, { status: 401, headers });
+      }
+
+      audit.log('sso.saml_login', session.userId, 'session', session.id, { tenantId: session.tenantId });
+
+      // Redirect to the relay state URL with session info
+      const redirectUrl = new URL(relayState || '/');
+      redirectUrl.searchParams.set('session', session.id);
+      return Response.redirect(redirectUrl.toString(), 302);
+    } catch (error) {
+      return Response.json(
+        { error: error instanceof Error ? error.message : 'SAML processing failed' },
+        { status: 500, headers }
+      );
+    }
+  }
+
+  // Validate SSO session
+  if (path === '/api/sso/session' && req.method === 'GET') {
+    const sessionId = req.headers.get('X-Session-ID');
+    if (!sessionId) {
+      return Response.json({ error: 'Session ID required' }, { status: 401, headers });
+    }
+
+    const session = ssoManager.validateSession(sessionId);
+    if (!session) {
+      return Response.json({ error: 'Invalid or expired session' }, { status: 401, headers });
+    }
+
+    return Response.json({
+      userId: session.userId,
+      email: session.email,
+      name: session.name,
+      tenantId: session.tenantId,
+    }, { headers });
+  }
+
+  // Logout SSO session
+  if (path === '/api/sso/logout' && req.method === 'POST') {
+    const sessionId = req.headers.get('X-Session-ID');
+    if (sessionId) {
+      ssoManager.destroySession(sessionId);
+      audit.log('sso.logout', null, 'session', sessionId, {});
+    }
+    return Response.json({ success: true }, { headers });
+  }
+
   return Response.json({ error: 'Not found' }, { status: 404, headers });
 }
 
@@ -777,6 +1036,10 @@ async function gracefulShutdown(signal: string): Promise<void> {
       // Client may already be disconnected
     }
   }
+
+  // Flush tenant usage stats
+  logger.info('Flushing tenant usage stats...');
+  tenantManager.shutdown();
 
   // Stop the server
   logger.info('Stopping HTTP server...');

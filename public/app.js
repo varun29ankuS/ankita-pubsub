@@ -18,6 +18,8 @@ class PubSubDashboard {
     this.consumerGroups = [];
     this.dlqMessages = [];
     this.publishHistory = [];
+    this.tenants = [];
+    this.currentTenant = null;
     this.currentView = 'overview';
     this.startTime = Date.now();
 
@@ -889,6 +891,7 @@ class PubSubDashboard {
       'dlq': 'Dead Letter Queue',
       'publish': 'Publish Message',
       'api-keys': 'API Keys',
+      'tenants': 'Tenants',
       'settings': 'Settings',
       'health': 'Health Status',
       'metrics': 'Prometheus Metrics',
@@ -1423,7 +1426,279 @@ class PubSubDashboard {
       case 'audit':
         this.loadAuditLog();
         break;
+      case 'tenants':
+        this.loadTenants();
+        break;
     }
+  }
+
+  // ============================================
+  // Multi-Tenancy Management
+  // ============================================
+
+  async loadTenants() {
+    try {
+      const response = await fetch('/api/tenants', {
+        headers: { 'X-API-Key': this.apiKey }
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to load tenants');
+      }
+
+      this.tenants = await response.json();
+      this.renderTenants();
+    } catch (error) {
+      console.error('Failed to load tenants:', error);
+      this.showToast('Failed to load tenants', 'error');
+    }
+  }
+
+  renderTenants() {
+    const grid = document.getElementById('tenantsGrid');
+    if (!grid) return;
+
+    if (!this.tenants || this.tenants.length === 0) {
+      grid.innerHTML = `
+        <div class="empty-state">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+            <polyline points="9 22 9 12 15 12 15 22"/>
+          </svg>
+          <p>No tenants configured</p>
+          <button class="btn btn-primary" onclick="dashboard.openCreateTenantModal()">Create First Tenant</button>
+        </div>
+      `;
+      return;
+    }
+
+    grid.innerHTML = this.tenants.map(tenant => `
+      <div class="tenant-card ${tenant.status}" data-tenant="${tenant.id}">
+        <div class="tenant-card-header">
+          <div class="tenant-info">
+            <span class="tenant-name">${tenant.name}</span>
+            <span class="tenant-slug">@${tenant.slug}</span>
+          </div>
+          <span class="tenant-status ${tenant.status}">${tenant.status}</span>
+        </div>
+        <div class="tenant-plan">
+          <span class="plan-badge ${tenant.plan}">${tenant.plan.toUpperCase()}</span>
+        </div>
+        <div class="tenant-stats">
+          <div class="tenant-stat">
+            <span class="tenant-stat-value">${this.formatNumber(tenant.usage?.messagesPublished || 0)}</span>
+            <span class="tenant-stat-label">Messages</span>
+          </div>
+          <div class="tenant-stat">
+            <span class="tenant-stat-value">${tenant.usage?.topicCount || 0}</span>
+            <span class="tenant-stat-label">Topics</span>
+          </div>
+          <div class="tenant-stat">
+            <span class="tenant-stat-value">${tenant.usage?.subscriberCount || 0}</span>
+            <span class="tenant-stat-label">Subscribers</span>
+          </div>
+        </div>
+        <div class="tenant-usage-bar">
+          <div class="tenant-usage-fill" style="width: ${this.getTenantUsagePercent(tenant)}%"></div>
+        </div>
+        <div class="tenant-usage-label">
+          ${this.formatNumber(tenant.usage?.messagesPublished || 0)} / ${tenant.limits?.maxMessagesPerMonth === -1 ? 'Unlimited' : this.formatNumber(tenant.limits?.maxMessagesPerMonth || 0)} messages this month
+        </div>
+        <div class="tenant-card-actions">
+          <button class="btn btn-sm btn-ghost" onclick="dashboard.viewTenantUsage('${tenant.id}')">Usage</button>
+          <button class="btn btn-sm btn-ghost" onclick="dashboard.configureTenantSSO('${tenant.id}')">SSO</button>
+          ${tenant.status === 'active'
+            ? `<button class="btn btn-sm btn-ghost" onclick="dashboard.suspendTenant('${tenant.id}')">Suspend</button>`
+            : `<button class="btn btn-sm btn-primary" onclick="dashboard.reactivateTenant('${tenant.id}')">Reactivate</button>`
+          }
+        </div>
+      </div>
+    `).join('');
+  }
+
+  getTenantUsagePercent(tenant) {
+    if (!tenant.limits?.maxMessagesPerMonth || tenant.limits.maxMessagesPerMonth === -1) {
+      return 0;
+    }
+    return Math.min(100, (tenant.usage?.messagesPublished || 0) / tenant.limits.maxMessagesPerMonth * 100);
+  }
+
+  openCreateTenantModal() {
+    const modal = document.getElementById('createTenantModal');
+    if (modal) modal.classList.add('open');
+  }
+
+  async createTenant() {
+    const name = document.getElementById('newTenantName')?.value;
+    const slug = document.getElementById('newTenantSlug')?.value;
+    const email = document.getElementById('newTenantEmail')?.value;
+    const plan = document.getElementById('newTenantPlan')?.value || 'free';
+
+    if (!name || !slug || !email) {
+      this.showToast('Please fill in all required fields', 'error');
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/tenants', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-API-Key': this.apiKey
+        },
+        body: JSON.stringify({ name, slug, email, plan })
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to create tenant');
+      }
+
+      const tenant = await response.json();
+      this.tenants.push(tenant);
+      this.renderTenants();
+
+      document.getElementById('createTenantModal')?.classList.remove('open');
+      document.getElementById('createTenantForm')?.reset();
+      this.showToast(`Tenant "${name}" created`, 'success');
+    } catch (error) {
+      this.showToast(error.message, 'error');
+    }
+  }
+
+  async viewTenantUsage(tenantId) {
+    try {
+      const response = await fetch(`/api/tenants/${tenantId}/usage`, {
+        headers: { 'X-API-Key': this.apiKey }
+      });
+
+      if (!response.ok) throw new Error('Failed to load usage');
+
+      const report = await response.json();
+      this.showTenantUsageModal(report);
+    } catch (error) {
+      this.showToast('Failed to load tenant usage', 'error');
+    }
+  }
+
+  showTenantUsageModal(report) {
+    const modal = document.getElementById('tenantUsageModal');
+    const content = document.getElementById('tenantUsageContent');
+
+    if (!modal || !content) return;
+
+    content.innerHTML = `
+      <div class="usage-report">
+        <h4>${report.tenant.name}</h4>
+        <p class="usage-period">Billing Period: ${new Date(report.period.start).toLocaleDateString()} - ${new Date(report.period.end).toLocaleDateString()}</p>
+
+        <div class="usage-grid">
+          <div class="usage-item">
+            <span class="usage-value">${this.formatNumber(report.usage.messagesPublished)}</span>
+            <span class="usage-label">Messages Published</span>
+            <div class="usage-bar"><div class="usage-fill" style="width: ${report.percentUsed.messages}%"></div></div>
+          </div>
+          <div class="usage-item">
+            <span class="usage-value">${this.formatNumber(report.usage.messagesDelivered)}</span>
+            <span class="usage-label">Messages Delivered</span>
+          </div>
+          <div class="usage-item">
+            <span class="usage-value">${this.formatBytes(report.usage.bytesTransferred)}</span>
+            <span class="usage-label">Data Transferred</span>
+          </div>
+          <div class="usage-item">
+            <span class="usage-value">${this.formatNumber(report.usage.apiCalls)}</span>
+            <span class="usage-label">API Calls</span>
+          </div>
+          <div class="usage-item">
+            <span class="usage-value">${report.usage.topicCount}</span>
+            <span class="usage-label">Topics</span>
+            <div class="usage-bar"><div class="usage-fill" style="width: ${report.percentUsed.topics}%"></div></div>
+          </div>
+          <div class="usage-item">
+            <span class="usage-value">${report.usage.subscriberCount}</span>
+            <span class="usage-label">Subscribers</span>
+          </div>
+        </div>
+      </div>
+    `;
+
+    modal.classList.add('open');
+  }
+
+  async configureTenantSSO(tenantId) {
+    const tenant = this.tenants.find(t => t.id === tenantId);
+    if (!tenant) return;
+
+    // For now, show a simple alert - in production, open a modal
+    this.showToast(`SSO configuration for "${tenant.name}" - Configure via API`, 'info');
+  }
+
+  async suspendTenant(tenantId) {
+    if (!confirm('Are you sure you want to suspend this tenant?')) return;
+
+    try {
+      const response = await fetch(`/api/tenants/${tenantId}/suspend`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-API-Key': this.apiKey
+        },
+        body: JSON.stringify({ reason: 'Manual suspension from dashboard' })
+      });
+
+      if (!response.ok) throw new Error('Failed to suspend tenant');
+
+      this.showToast('Tenant suspended', 'success');
+      this.loadTenants();
+    } catch (error) {
+      this.showToast('Failed to suspend tenant', 'error');
+    }
+  }
+
+  async reactivateTenant(tenantId) {
+    try {
+      const response = await fetch(`/api/tenants/${tenantId}/reactivate`, {
+        method: 'POST',
+        headers: { 'X-API-Key': this.apiKey }
+      });
+
+      if (!response.ok) throw new Error('Failed to reactivate tenant');
+
+      this.showToast('Tenant reactivated', 'success');
+      this.loadTenants();
+    } catch (error) {
+      this.showToast('Failed to reactivate tenant', 'error');
+    }
+  }
+
+  setupTenantEventListeners() {
+    // Create tenant form
+    document.getElementById('createTenantForm')?.addEventListener('submit', (e) => {
+      e.preventDefault();
+      this.createTenant();
+    });
+
+    // Tenant search
+    document.getElementById('tenantSearch')?.addEventListener('input', (e) => {
+      const search = e.target.value.toLowerCase();
+      const filtered = this.tenants.filter(t =>
+        t.name.toLowerCase().includes(search) ||
+        t.slug.toLowerCase().includes(search) ||
+        t.email.toLowerCase().includes(search)
+      );
+      this.renderFilteredTenants(filtered);
+    });
+
+    // New tenant button
+    document.getElementById('newTenantBtn')?.addEventListener('click', () => this.openCreateTenantModal());
+  }
+
+  renderFilteredTenants(tenants) {
+    const originalTenants = this.tenants;
+    this.tenants = tenants;
+    this.renderTenants();
+    this.tenants = originalTenants;
   }
 }
 
@@ -1433,4 +1708,5 @@ const dashboard = new PubSubDashboard();
 // Setup enterprise event listeners after DOM is ready
 document.addEventListener('DOMContentLoaded', () => {
   dashboard.setupEnterpriseEventListeners();
+  dashboard.setupTenantEventListeners();
 });

@@ -606,6 +606,297 @@ export class PubSubDatabase {
   close(): void {
     this.db.close();
   }
+
+  // ============================================
+  // Tenant Operations
+  // ============================================
+
+  private initializeTenantTables(): void {
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS tenants (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        slug TEXT UNIQUE NOT NULL,
+        plan TEXT NOT NULL DEFAULT 'free',
+        status TEXT NOT NULL DEFAULT 'active',
+        created_at INTEGER NOT NULL,
+        email TEXT NOT NULL,
+        company TEXT,
+        limits TEXT NOT NULL,
+        stripe_customer_id TEXT,
+        billing_email TEXT
+      )
+    `);
+
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS tenant_usage (
+        tenant_id TEXT PRIMARY KEY,
+        messages_published INTEGER DEFAULT 0,
+        messages_delivered INTEGER DEFAULT 0,
+        bytes_transferred INTEGER DEFAULT 0,
+        api_calls INTEGER DEFAULT 0,
+        active_connections INTEGER DEFAULT 0,
+        topic_count INTEGER DEFAULT 0,
+        subscriber_count INTEGER DEFAULT 0,
+        period_start INTEGER NOT NULL,
+        period_end INTEGER NOT NULL,
+        hourly_stats TEXT,
+        FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+      )
+    `);
+
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS sso_configs (
+        tenant_id TEXT PRIMARY KEY,
+        provider TEXT NOT NULL,
+        enabled INTEGER DEFAULT 0,
+        entity_id TEXT,
+        sso_url TEXT,
+        certificate TEXT,
+        metadata_url TEXT,
+        attribute_mapping TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER,
+        FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+      )
+    `);
+
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS sso_sessions (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        email TEXT NOT NULL,
+        name TEXT,
+        roles TEXT,
+        created_at INTEGER NOT NULL,
+        expires_at INTEGER NOT NULL,
+        FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+      )
+    `);
+
+    this.db.run(`CREATE INDEX IF NOT EXISTS idx_tenants_slug ON tenants(slug)`);
+    this.db.run(`CREATE INDEX IF NOT EXISTS idx_sso_sessions_expires ON sso_sessions(expires_at)`);
+  }
+
+  saveTenant(tenant: any): void {
+    // Ensure tables exist
+    this.initializeTenantTables();
+
+    const stmt = this.db.prepare(`
+      INSERT OR REPLACE INTO tenants (id, name, slug, plan, status, created_at, email, company, limits, stripe_customer_id, billing_email)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    stmt.run(
+      tenant.id,
+      tenant.name,
+      tenant.slug,
+      tenant.plan,
+      tenant.status,
+      tenant.createdAt,
+      tenant.email,
+      tenant.company || null,
+      JSON.stringify(tenant.limits),
+      tenant.stripeCustomerId || null,
+      tenant.billingEmail || null
+    );
+
+    // Also save initial usage
+    this.saveTenantUsage(tenant.id, tenant.usage);
+  }
+
+  getTenant(id: string): any | null {
+    this.initializeTenantTables();
+    const stmt = this.db.prepare('SELECT * FROM tenants WHERE id = ?');
+    const row = stmt.get(id) as any;
+    if (!row) return null;
+
+    const usage = this.getTenantUsage(id);
+    return {
+      id: row.id,
+      name: row.name,
+      slug: row.slug,
+      plan: row.plan,
+      status: row.status,
+      createdAt: row.created_at,
+      email: row.email,
+      company: row.company,
+      limits: JSON.parse(row.limits),
+      stripeCustomerId: row.stripe_customer_id,
+      billingEmail: row.billing_email,
+      usage,
+    };
+  }
+
+  getAllTenants(): any[] {
+    this.initializeTenantTables();
+    const stmt = this.db.prepare('SELECT * FROM tenants ORDER BY created_at DESC');
+    const rows = stmt.all() as any[];
+
+    return rows.map(row => {
+      const usage = this.getTenantUsage(row.id);
+      return {
+        id: row.id,
+        name: row.name,
+        slug: row.slug,
+        plan: row.plan,
+        status: row.status,
+        createdAt: row.created_at,
+        email: row.email,
+        company: row.company,
+        limits: JSON.parse(row.limits),
+        stripeCustomerId: row.stripe_customer_id,
+        billingEmail: row.billing_email,
+        usage,
+      };
+    });
+  }
+
+  saveTenantUsage(tenantId: string, usage: any): void {
+    this.initializeTenantTables();
+    const stmt = this.db.prepare(`
+      INSERT OR REPLACE INTO tenant_usage (tenant_id, messages_published, messages_delivered, bytes_transferred, api_calls, active_connections, topic_count, subscriber_count, period_start, period_end, hourly_stats)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    stmt.run(
+      tenantId,
+      usage.messagesPublished || 0,
+      usage.messagesDelivered || 0,
+      usage.bytesTransferred || 0,
+      usage.apiCalls || 0,
+      usage.activeConnections || 0,
+      usage.topicCount || 0,
+      usage.subscriberCount || 0,
+      usage.periodStart || Date.now(),
+      usage.periodEnd || Date.now() + 30 * 24 * 60 * 60 * 1000,
+      JSON.stringify(usage.hourlyStats || [])
+    );
+  }
+
+  getTenantUsage(tenantId: string): any {
+    this.initializeTenantTables();
+    const stmt = this.db.prepare('SELECT * FROM tenant_usage WHERE tenant_id = ?');
+    const row = stmt.get(tenantId) as any;
+
+    if (!row) {
+      return {
+        messagesPublished: 0,
+        messagesDelivered: 0,
+        bytesTransferred: 0,
+        apiCalls: 0,
+        activeConnections: 0,
+        topicCount: 0,
+        subscriberCount: 0,
+        periodStart: Date.now(),
+        periodEnd: Date.now() + 30 * 24 * 60 * 60 * 1000,
+        hourlyStats: [],
+      };
+    }
+
+    return {
+      messagesPublished: row.messages_published,
+      messagesDelivered: row.messages_delivered,
+      bytesTransferred: row.bytes_transferred,
+      apiCalls: row.api_calls,
+      activeConnections: row.active_connections,
+      topicCount: row.topic_count,
+      subscriberCount: row.subscriber_count,
+      periodStart: row.period_start,
+      periodEnd: row.period_end,
+      hourlyStats: JSON.parse(row.hourly_stats || '[]'),
+    };
+  }
+
+  // ============================================
+  // SSO Configuration Operations
+  // ============================================
+
+  saveSSOConfig(config: any): void {
+    this.initializeTenantTables();
+    const stmt = this.db.prepare(`
+      INSERT OR REPLACE INTO sso_configs (tenant_id, provider, enabled, entity_id, sso_url, certificate, metadata_url, attribute_mapping, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    stmt.run(
+      config.tenantId,
+      config.provider,
+      config.enabled ? 1 : 0,
+      config.entityId || null,
+      config.ssoUrl || null,
+      config.certificate || null,
+      config.metadataUrl || null,
+      JSON.stringify(config.attributeMapping || {}),
+      config.createdAt || Date.now(),
+      Date.now()
+    );
+  }
+
+  getSSOConfig(tenantId: string): any | null {
+    this.initializeTenantTables();
+    const stmt = this.db.prepare('SELECT * FROM sso_configs WHERE tenant_id = ?');
+    const row = stmt.get(tenantId) as any;
+    if (!row) return null;
+
+    return {
+      tenantId: row.tenant_id,
+      provider: row.provider,
+      enabled: row.enabled === 1,
+      entityId: row.entity_id,
+      ssoUrl: row.sso_url,
+      certificate: row.certificate,
+      metadataUrl: row.metadata_url,
+      attributeMapping: JSON.parse(row.attribute_mapping || '{}'),
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  }
+
+  saveSSOSession(session: any): void {
+    this.initializeTenantTables();
+    const stmt = this.db.prepare(`
+      INSERT OR REPLACE INTO sso_sessions (id, tenant_id, user_id, email, name, roles, created_at, expires_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    stmt.run(
+      session.id,
+      session.tenantId,
+      session.userId,
+      session.email,
+      session.name || null,
+      JSON.stringify(session.roles || []),
+      session.createdAt || Date.now(),
+      session.expiresAt
+    );
+  }
+
+  getSSOSession(sessionId: string): any | null {
+    this.initializeTenantTables();
+    const stmt = this.db.prepare('SELECT * FROM sso_sessions WHERE id = ? AND expires_at > ?');
+    const row = stmt.get(sessionId, Date.now()) as any;
+    if (!row) return null;
+
+    return {
+      id: row.id,
+      tenantId: row.tenant_id,
+      userId: row.user_id,
+      email: row.email,
+      name: row.name,
+      roles: JSON.parse(row.roles || '[]'),
+      createdAt: row.created_at,
+      expiresAt: row.expires_at,
+    };
+  }
+
+  deleteSSOSession(sessionId: string): void {
+    this.initializeTenantTables();
+    this.db.run('DELETE FROM sso_sessions WHERE id = ?', [sessionId]);
+  }
+
+  cleanupExpiredSSOSessions(): number {
+    this.initializeTenantTables();
+    const result = this.db.run('DELETE FROM sso_sessions WHERE expires_at < ?', [Date.now()]);
+    return result.changes;
+  }
 }
 
 // Singleton instance
