@@ -483,6 +483,10 @@ function handleHTTPRequest(req: Request): Response {
     return serveStaticFile('public/app.js', 'application/javascript', corsHeaders);
   }
 
+  if (path === '/logo.svg') {
+    return serveStaticFile('public/logo.svg', 'image/svg+xml', corsHeaders);
+  }
+
   if (path === '/openapi.yaml' || path === '/api/openapi') {
     return serveStaticFile('public/openapi.yaml', 'application/x-yaml', corsHeaders);
   }
