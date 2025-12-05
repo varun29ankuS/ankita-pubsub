@@ -1,6 +1,13 @@
-# Ankita PubSub System
+<p align="center">
+  <img src="public/logo.svg" alt="Ankita PubSub" width="120" height="120">
+</p>
 
-A production-ready **Publisher-Subscriber messaging system** built with Bun and TypeScript. Features enterprise-grade monitoring, Prometheus metrics, health checks, and a real-time dashboard.
+<h1 align="center">Ankita PubSub System</h1>
+
+<p align="center">
+  A production-ready <strong>Publisher-Subscriber messaging system</strong> built with Bun and TypeScript.<br>
+  Features enterprise-grade monitoring, Prometheus metrics, health checks, and a real-time dashboard.
+</p>
 
 ## Features
 
