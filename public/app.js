@@ -40,6 +40,8 @@ class PubSubDashboard {
   }
 
   async init() {
+    console.log('PubSubDashboard initializing...');
+
     // Setup login event listeners first
     this.setupLoginEventListeners();
 
@@ -50,19 +52,19 @@ class PubSubDashboard {
         const session = JSON.parse(savedSession);
         this.currentUser = session.user;
         this.isAuthenticated = true;
+        console.log('Restored session for:', this.currentUser?.email);
         this.showDashboard();
+        // Initialize dashboard after restoring session
+        await this.initDashboard();
+        return;
       } catch (e) {
+        console.error('Failed to restore session:', e);
         sessionStorage.removeItem('ankita-session');
       }
     }
 
-    // If not authenticated, wait for login
-    if (!this.isAuthenticated) {
-      return;
-    }
-
-    // Initialize dashboard
-    await this.initDashboard();
+    // If not authenticated, show login screen
+    console.log('No session found, showing login screen');
   }
 
   async initDashboard() {
@@ -115,8 +117,11 @@ class PubSubDashboard {
   }
 
   async handleLogin() {
+    console.log('handleLogin called');
     const email = document.getElementById('loginEmail')?.value;
     const password = document.getElementById('loginPassword')?.value;
+
+    console.log('Email:', email, 'Password length:', password?.length);
 
     if (!email || !password) {
       this.showLoginError('Please enter email and password');
@@ -124,7 +129,9 @@ class PubSubDashboard {
     }
 
     // Demo credentials check
+    console.log('Checking credentials...');
     if (email === 'admin@ankita.io' && password === 'admin123') {
+      console.log('Demo credentials matched!');
       this.currentUser = {
         id: 'admin-001',
         email: email,
